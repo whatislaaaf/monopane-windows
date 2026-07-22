@@ -1,0 +1,18 @@
+# Build output
+build/
+out/
+
+# Visual Studio / MSVC
+.vs/
+*.obj
+*.res
+*.exe
+*.pdb
+*.ilk
+*.idb
+*.iobj
+*.ipdb
+*.log
+
+# CMake
+CMakeUserPresets.json

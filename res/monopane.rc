@@ -1,0 +1,58 @@
+#include <winres.h>
+#include "resource.h"
+
+1 RT_MANIFEST "monopane.manifest"
+
+IDI_APP ICON "monopane.ico"
+
+IDD_SETTINGS DIALOGEX 0, 0, 252, 178
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Monopane settings"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "When activating a window", -1, 8, 8, 236, 46
+    CONTROL         "Bring all windows of the same app forward", IDC_CHK_ACTIVATE_ALL,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 22, 220, 10
+    LTEXT           "Off: only the selected window is activated.", -1, 27, 36, 209, 8
+
+    GROUPBOX        "Switcher", -1, 8, 60, 236, 44
+    CONTROL         "Preselect the previously active window", IDC_CHK_PRESELECT,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 74, 220, 10
+    CONTROL         "Match app names when searching, not just titles", IDC_CHK_MATCH_APP,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 88, 220, 10
+
+    GROUPBOX        "Search memory", -1, 8, 110, 236, 40
+    LTEXT           "Monopane remembers which app you pick for each search.",
+                    -1, 16, 122, 220, 8
+    PUSHBUTTON      "Clear search memory", IDC_BTN_CLEAR_MEMORY, 16, 132, 90, 14
+
+    CONTROL         "Start with Windows", IDC_CHK_AUTOSTART,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 158, 130, 10
+
+    DEFPUSHBUTTON   "OK", IDOK, 140, 156, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 194, 156, 50, 14
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "FileDescription", "Monopane"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "monopane"
+            VALUE "OriginalFilename", "monopane.exe"
+            VALUE "ProductName", "Monopane"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
