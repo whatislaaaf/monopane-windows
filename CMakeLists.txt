@@ -10,6 +10,9 @@ add_executable(monopane WIN32
     src/fuzzy.cpp
     src/settings.cpp
     src/aliases.cpp
+    external/keychord/keychord_name.cpp
+    external/keychord/keychord_chord.cpp
+    external/keychord/keychord_capture.cpp
     res/monopane.rc
 )
 

@@ -3,13 +3,13 @@
 A searchable Alt+Tab window switcher for Windows, inspired by the *Search in Context*
 feature of the [Context](https://contexts.co) app on macOS.
 
-Press **Cmd+Tab** (see below), type the first few letters of a window's name,
+Press your hotkey (**Cmd+Tab** by default, see below), type the first few letters of a window's name,
 press **Enter** — that window becomes active.
 
 ## Features
 
-- **Mac-style Cmd+Tab** opens a searchable overlay (via a low-level keyboard
-  hook; native Alt+Tab is left untouched)
+- **A hotkey you capture by pressing it** opens a searchable overlay (via a
+  low-level keyboard hook; native Alt+Tab is left untouched)
 - **Fuzzy search** over app name and window title — `chr` matches *Google Chrome*,
   `vsc` matches *Visual Studio Code*
 - **Keyboard navigation** — Up/Down arrows, Tab / Shift+Tab, PageUp/PageDown,
@@ -24,19 +24,38 @@ press **Enter** — that window becomes active.
 
 ## The hotkey
 
-Monopane is built to pair with [MacKeys](../mackeys-windows), which remaps a Mac
-keyboard's left Cmd key on Windows (physically delivered as `F23` via a kernel
-Scancode Map, then held as `Left Ctrl` by MacKeys). The switcher opens on
-**left Cmd+Tab** and recognizes the key in either form, so it works whether
-MacKeys is running, paused, or absent. Physical `Ctrl+Tab` is deliberately not
-intercepted — in-app tab switching keeps working — and native `Alt+Tab` and
-`Win+Tab` are untouched.
+**Settings → Hotkey → Set…** captures it: hold the modifiers, press the trigger
+key, let go. The trigger is whichever key you pressed last. Esc cancels, and the
+capture releases itself after 15 seconds, so it can never leave the keyboard
+swallowed.
+
+Out of the box it is **Cmd+Tab**, where Cmd is whichever key
+[MacKeys](https://github.com/whatislaaaf/mackeys-windows) gives the *Ctrl (Mac
+cmd)* role.
+
+Two things make this more precise than a normal Windows hotkey, both courtesy of
+[keychord](https://github.com/whatislaaaf/keychord):
+
+- **Left and right are distinct**, because keys are identified by scancode
+  rather than virtual-key code.
+- **A remapped key is distinct from a real one.** Each key in the chord records
+  whether it has to arrive as a genuine keypress or as one MacKeys injected.
+  That is what lets the hotkey sit on the remapped Ctrl while a physical
+  `Ctrl+Tab` still reaches your editor, so binding it here does not cost you
+  that chord everywhere else.
+
+Extra modifiers are tolerated, so `Cmd+Shift+Tab` still cycles backwards. Native
+`Alt+Tab` and `Win+Tab` are untouched.
+
+A hotkey captured while MacKeys is running records MacKeys' injected key, so it
+will not fire while MacKeys is paused. Capture a different chord if you want one
+that works without it.
 
 ## Usage
 
 | Key | Action |
 | --- | --- |
-| `Cmd+Tab` | Open the switcher (opens on the monitor with the cursor) |
+| your hotkey (default `Cmd+Tab`) | Open the switcher (opens on the monitor with the cursor) |
 | `Cmd+Tab` again / `Tab` / `↓` | Move selection down |
 | `Cmd+Shift+Tab` / `Shift+Tab` / `↑` | Move selection up |
 | type letters | Fuzzy-filter the window list |
@@ -49,6 +68,15 @@ Monopane lives in the system tray. Right-click the tray icon for
 ## Building
 
 Requires Visual Studio 2019+ with the *Desktop development with C++* workload.
+
+Key handling lives in the [keychord](https://github.com/whatislaaaf/keychord)
+submodule, so a fresh clone needs:
+
+```bat
+git submodule update --init
+```
+
+Then:
 
 ```bat
 build.bat
@@ -63,8 +91,5 @@ cmake --build out --config Release
 
 ## Limitations
 
-- The hotkey assumes the MacKeys left-Cmd setup (`F23` scancode remap). On a
-  stock keyboard without that remap there is currently no way to trigger the
-  switcher.
 - Windows Store / UWP apps are hosted by *ApplicationFrameHost*, so their icon and
   app name may show as the frame host rather than the actual app.

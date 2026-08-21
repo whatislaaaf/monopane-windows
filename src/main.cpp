@@ -438,12 +438,38 @@ LRESULT CALLBACK EditSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     return CallWindowProcW(g_editBaseProc, hwnd, msg, wParam, lParam);
 }
 
-// True while MacKeys' cmd-remap Ctrl (its marker on the injected event) is
-// held. Only used to tell that Ctrl apart from a physically pressed Ctrl —
-// the authoritative "is the key down NOW" checks below use GetAsyncKeyState,
-// so a missed keyup event (hook timeout while the thread was busy) cannot
-// leave the hotkey stuck on.
-bool g_cmdCtrlDown = false;
+// Which keys are down and how each one arrived, indexed by KeySlot(). Tracked
+// here rather than read back from GetAsyncKeyState because that reports
+// *virtual* keys: it merges left and right Ctrl, and shows the Ctrl MacKeys
+// injects as though a real Ctrl key were pressed. Those are exactly the two
+// distinctions the hotkey depends on.
+keychord::KeyOrigin g_held[keychord::kKeySlots];
+int g_heldCount = 0;
+
+keychord::KeyId SlotToKeyId(int slot)
+{
+    return static_cast<keychord::KeyId>((slot & 0x100) ? (0xE000 | (slot & 0xFF))
+                                                       : (slot & 0xFF));
+}
+
+// A keyup is missed if the hook times out while the thread is busy, which
+// would leave a modifier stuck down and the hotkey permanently armed. Before
+// matching, drop anything the OS agrees is no longer held.
+void PruneStaleHeld()
+{
+    for (int slot = 0; slot < keychord::kKeySlots; ++slot) {
+        if (g_held[slot] == keychord::KeyOrigin::Any)
+            continue;
+        const UINT vk = MapVirtualKeyW(SlotToKeyId(slot), MAPVK_VSC_TO_VK_EX);
+        if (vk == 0)
+            continue; // nothing to check it against; leave it alone
+        if (!(GetAsyncKeyState(static_cast<int>(vk)) & 0x8000)) {
+            g_held[slot] = keychord::KeyOrigin::Any;
+            if (g_heldCount > 0)
+                --g_heldCount;
+        }
+    }
+}
 
 LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
 {
@@ -451,25 +477,44 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
         const auto* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
         const bool down = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
         const bool injected = (kb->flags & LLKHF_INJECTED) != 0;
+        const bool fromMacKeys = injected && kb->dwExtraInfo == kMacKeysMarker;
 
-        if (kb->vkCode == VK_LCONTROL && injected &&
-            kb->dwExtraInfo == kMacKeysMarker) {
-            g_cmdCtrlDown = down;
-        } else if (kb->vkCode == VK_TAB && down && !injected) {
-            // Self-heal: if the flag claims MacKeys' Ctrl is held but no Ctrl
-            // is actually down, the release event was missed — clear it.
-            if (g_cmdCtrlDown && !(GetAsyncKeyState(VK_LCONTROL) & 0x8000))
-                g_cmdCtrlDown = false;
+        // Input injected by anything else (remote desktop, AutoHotkey) is left
+        // alone entirely, as before.
+        if (!injected || fromMacKeys) {
+            const keychord::KeyId id =
+                keychord::MakeKeyId(kb->scanCode, (kb->flags & LLKHF_EXTENDED) != 0);
+            const keychord::KeyOrigin origin = fromMacKeys ? keychord::KeyOrigin::Injected
+                                                           : keychord::KeyOrigin::Physical;
 
-            // Cmd is held either as MacKeys' injected Ctrl (verified against
-            // real key state) or as raw F23 when MacKeys is paused or absent
-            // (only then do F23 events reach the async key state at all).
-            const bool cmdHeld =
-                g_cmdCtrlDown || (GetAsyncKeyState(VK_F23) & 0x8000);
-            if (cmdHeld) {
-                const WPARAM shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
-                PostMessageW(g_hwndOverlay, WM_APP_HOTKEY, shift, 0);
-                return 1;  // the Tab belongs to the switcher
+            // While Settings is capturing a hotkey it takes raw keystrokes
+            // ahead of everything, and swallows them.
+            if (keychord::ChordCaptureActive() && keychord::FeedChordKey(id, down, origin))
+                return 1;
+
+            const int slot = keychord::KeySlot(id);
+            if (down) {
+                if (g_held[slot] == keychord::KeyOrigin::Any)
+                    ++g_heldCount;
+                g_held[slot] = origin;
+            } else if (g_held[slot] != keychord::KeyOrigin::Any) {
+                g_held[slot] = keychord::KeyOrigin::Any;
+                if (g_heldCount > 0)
+                    --g_heldCount;
+            }
+
+            const keychord::KeyChord& hotkey = g_settings.hotkey;
+            if (down && id == hotkey.trigger &&
+                (hotkey.triggerOrigin == keychord::KeyOrigin::Any ||
+                 hotkey.triggerOrigin == origin)) {
+                PruneStaleHeld();
+                // Loose match: Shift is held for reverse cycling, and the
+                // switcher still has to open.
+                if (keychord::ChordMatches(hotkey, g_held, g_heldCount, /*exact=*/false)) {
+                    const WPARAM shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
+                    PostMessageW(g_hwndOverlay, WM_APP_HOTKEY, shift, 0);
+                    return 1; // the trigger belongs to the switcher
+                }
             }
         }
     }

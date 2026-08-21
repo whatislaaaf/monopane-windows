@@ -19,6 +19,11 @@ if not defined VSPATH (
 call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 1
 
+if not exist external\keychord\keychord.h (
+    echo The keychord submodule is missing. Run: git submodule update --init
+    exit /b 1
+)
+
 if not exist build mkdir build
 
 rc /nologo /fo build\monopane.res res\monopane.rc
@@ -26,6 +31,8 @@ if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /O2 /W4 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX ^
    src\main.cpp src\window_list.cpp src\fuzzy.cpp src\settings.cpp src\aliases.cpp ^
+   external\keychord\keychord_name.cpp external\keychord\keychord_chord.cpp ^
+   external\keychord\keychord_capture.cpp ^
    build\monopane.res ^
    /Fo:build\ /Fe:build\monopane.exe ^
    /link user32.lib gdi32.lib shell32.lib comctl32.lib dwmapi.lib ^

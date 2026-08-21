@@ -8,3 +8,6 @@
 #define IDC_CHK_MATCH_APP       303
 #define IDC_CHK_AUTOSTART       304
 #define IDC_BTN_CLEAR_MEMORY    305
+#define IDC_TXT_HOTKEY          306
+#define IDC_BTN_HOTKEY          307
+#define IDC_TXT_HOTKEY_HINT     308
