@@ -142,35 +142,7 @@ void BuildFilteredBoards()
 
 // ------------------------------------------------------------------ naming
 
-struct NameOverride {
-    KeyId id;
-    const wchar_t* name;
-};
 
-// Where the keycap legend alone would be ambiguous or unreadable in a
-// sentence ("' -> Home" is worse than "Quote -> Home").
-const NameOverride kNames[] = {
-    { 0x1D,   L"Left Ctrl" },   { 0xE01D, L"Right Ctrl" },
-    { 0x38,   L"Left Alt" },    { 0xE038, L"Right Alt" },
-    { 0x2A,   L"Left Shift" },  { 0x36,   L"Right Shift" },
-    { 0xE05B, L"Left Win" },    { 0xE05C, L"Right Win" },
-    { 0xE05D, L"Menu" },        { 0x3A,   L"Caps Lock" },
-    { 0x0E,   L"Backspace" },   { 0x1C,   L"Enter" },
-    { 0x39,   L"Space" },       { 0x0F,   L"Tab" },
-    { 0x01,   L"Esc" },
-    { 0xE048, L"Up" },          { 0xE050, L"Down" },
-    { 0xE04B, L"Left" },        { 0xE04D, L"Right" },
-    { 0xE047, L"Home" },        { 0xE04F, L"End" },
-    { 0xE049, L"Page Up" },     { 0xE051, L"Page Down" },
-    { 0xE052, L"Insert" },      { 0xE053, L"Delete" },
-    { 0x27,   L"Semicolon" },   { 0x28,   L"Quote" },
-    { 0x29,   L"Backtick" },    { 0x33,   L"Comma" },
-    { 0x34,   L"Period" },      { 0x35,   L"Slash" },
-    { 0x2B,   L"Backslash" },   { 0x56,   L"ISO Backslash" },
-    { 0x1A,   L"Left Bracket" },{ 0x1B,   L"Right Bracket" },
-    { 0x0C,   L"Minus" },       { 0x0D,   L"Equals" },
-    { 0x6E,   L"F23" },         { 0x76,   L"F24" },
-};
 
 std::string ToAscii(const std::wstring& s)
 {
@@ -183,7 +155,6 @@ std::string ToAscii(const std::wstring& s)
 // -------------------------------------------------------------- the control
 
 constexpr UINT kCaptureTimer = 1;
-constexpr UINT kChordCaptureTimer = 2;
 constexpr UINT kCaptureTimeoutMs = 15000;
 
 constexpr UINT kMenuPressKey = 1;
@@ -206,17 +177,9 @@ struct KbState {
 
 // Only one capture is ever armed (the settings dialog is modal), so the hook
 // needs a single place to look.
-enum class CaptureMode { None, SingleKey, KeyChord };
-CaptureMode g_captureMode = CaptureMode::None;
+
 HWND g_captureHwnd = nullptr;
 
-// Chord capture: keys accumulate as they go down and the chord is finalised
-// when the last one comes back up, so the trigger is whatever was pressed
-// last and everything before it is a modifier.
-KeyChord g_chord;
-bool g_chordDown[kKeySlots] = {};
-int g_chordHeld = 0;
-bool g_chordGotKey = false;
 
 KbState* State(HWND hwnd)
 {
@@ -266,7 +229,6 @@ void EndCapture(HWND hwnd, KbState* st)
     if (!st->capturing)
         return;
     st->capturing = false;
-    g_captureMode = CaptureMode::None;
     st->pendingUp = kNoKey;
     g_captureHwnd = nullptr;
     KillTimer(hwnd, kCaptureTimer);
@@ -279,7 +241,6 @@ void BeginCapture(HWND hwnd, KbState* st)
     if (st->selected < 0 || st->selected >= count)
         return;
     st->capturing = true;
-    g_captureMode = CaptureMode::SingleKey;
     st->pendingUp = kNoKey;
     g_captureHwnd = hwnd;
     // Every keystroke is swallowed while armed, so it must not be possible to
@@ -686,29 +647,6 @@ const KeyCap* BoardKeys(BoardLayout layout, int& count)
     return board.data();
 }
 
-const wchar_t* KeyName(KeyId id)
-{
-    for (const NameOverride& n : kNames)
-        if (n.id == id)
-            return n.name;
-    for (const KeyCap& k : kBoard)
-        if (k.id == id && k.id != kNoKey)
-            return k.label;
-
-    // Not on this board and not a key we have a word for — show the scancode
-    // rather than inventing a name. Rotating buffers so two names can be built
-    // for one sentence ("Key 5A -> Key 6B") without the second clobbering the
-    // first.
-    static wchar_t buffers[4][16];
-    static int next = 0;
-    wchar_t* buf = buffers[next];
-    next = (next + 1) % 4;
-    if (KeyIsExtended(id))
-        wsprintfW(buf, L"Key E0%02X", id & 0xFF);
-    else
-        wsprintfW(buf, L"Key %02X", id & 0xFF);
-    return buf;
-}
 
 std::wstring DescribeBind(const Bind& bind)
 {
@@ -746,16 +684,6 @@ std::wstring KeyboardStatusText(HWND control)
     return st ? st->status : std::wstring();
 }
 
-std::wstring DescribeChord(const KeyChord& chord)
-{
-    if (!ChordValid(chord))
-        return L"(none)";
-    std::wstring out;
-    for (uint8_t i = 0; i < chord.modCount; ++i)
-        out += std::wstring(KeyName(chord.mods[i])) + L" + ";
-    return out + KeyName(chord.trigger);
-}
-
 std::wstring DescribeChordAction(const ChordBinding& b)
 {
     switch (b.action) {
@@ -777,76 +705,9 @@ std::string DescribeChordBindingAscii(const ChordBinding& b)
     return ToAscii(DescribeChord(b.from)) + " -> " + ToAscii(DescribeChordAction(b));
 }
 
-bool BeginChordCapture(HWND notify)
-{
-    if (g_captureHwnd)
-        return false;
-    g_chord = KeyChord();
-    for (bool& down : g_chordDown)
-        down = false;
-    g_chordHeld = 0;
-    g_chordGotKey = false;
-    g_captureMode = CaptureMode::KeyChord;
-    g_captureHwnd = notify;
-    SetTimer(notify, kChordCaptureTimer, kCaptureTimeoutMs, nullptr);
-    return true;
-}
-
-void CancelChordCapture()
-{
-    if (g_captureMode != CaptureMode::KeyChord)
-        return;
-    KillTimer(g_captureHwnd, kChordCaptureTimer);
-    g_captureMode = CaptureMode::None;
-    g_captureHwnd = nullptr;
-}
-
-KeyChord CapturedChord()
-{
-    return g_chord;
-}
-
 bool CaptureActive()
 {
     return g_captureHwnd != nullptr;
-}
-
-// Accumulates keys while they go down and finalises on the last release, so
-// the trigger is whatever was pressed last. Everything is swallowed meanwhile.
-static bool ForwardChordKey(KeyId id, bool down)
-{
-    HWND notify = g_captureHwnd;
-    const int slot = KeySlot(id);
-
-    if (down) {
-        if (g_chordDown[slot])
-            return true; // autorepeat
-        if (!g_chordGotKey && id == 0x01) {
-            CancelChordCapture();
-            PostMessageW(notify, CHM_CANCELLED, 0, 0);
-            return true;
-        }
-        g_chordDown[slot] = true;
-        ++g_chordHeld;
-        g_chordGotKey = true;
-        // The key pressed before this one becomes a modifier.
-        if (ChordValid(g_chord) && g_chord.modCount < kMaxChordMods)
-            g_chord.mods[g_chord.modCount++] = g_chord.trigger;
-        g_chord.trigger = id;
-        return true;
-    }
-
-    if (!g_chordDown[slot])
-        return false; // held before we armed; not ours to eat
-    g_chordDown[slot] = false;
-    if (--g_chordHeld > 0)
-        return true;
-
-    KillTimer(notify, kChordCaptureTimer);
-    g_captureMode = CaptureMode::None;
-    g_captureHwnd = nullptr;
-    PostMessageW(notify, CHM_CAPTURED, 0, 0);
-    return true;
 }
 
 bool ForwardCaptureKey(KeyId id, bool down)
@@ -854,8 +715,6 @@ bool ForwardCaptureKey(KeyId id, bool down)
     HWND hwnd = g_captureHwnd;
     if (!hwnd)
         return false;
-    if (g_captureMode == CaptureMode::KeyChord)
-        return ForwardChordKey(id, down);
 
     KbState* st = State(hwnd);
     if (!st || !st->capturing) {
@@ -894,7 +753,6 @@ bool ForwardCaptureKey(KeyId id, bool down)
 
     st->pendingUp = id;
     st->capturing = false;
-    g_captureMode = CaptureMode::None;
     g_captureHwnd = nullptr;
     KillTimer(hwnd, kCaptureTimer);
     ApplyBind(hwnd, st, bind);

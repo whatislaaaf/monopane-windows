@@ -71,7 +71,7 @@ std::vector<ChordBinding> g_chords;
 // than read from GetAsyncKeyState because that reports the *virtual* keys —
 // merging left and right Ctrl, and seeing the Ctrl a remap injects as though
 // the user had pressed a real Ctrl key.
-bool g_physDown[kKeySlots] = {};
+KeyOrigin g_physDown[kKeySlots] = {};
 int g_physCount = 0;
 
 int g_layerHeld = 0;         // number of held layer keys
@@ -193,7 +193,7 @@ void ReleaseTranslatedKeys()
     }
     g_layerHeld = 0;
     for (int slot = 0; slot < kKeySlots; ++slot)
-        g_physDown[slot] = false;
+        g_physDown[slot] = KeyOrigin::Any;
     g_physCount = 0;
     if (g_ctrlSwapDown) {
         SendKey(kScLCtrl, false); // release the Ctrl held by the Mac-cmd remap
@@ -272,12 +272,9 @@ void RunChord(const ChordBinding& binding)
 const ChordBinding* MatchChord(KeyId trigger)
 {
     for (const ChordBinding& c : g_chords) {
-        if (c.from.trigger != trigger || g_physCount != c.from.modCount + 1)
+        if (c.from.trigger != trigger)
             continue;
-        bool all = true;
-        for (uint8_t i = 0; i < c.from.modCount && all; ++i)
-            all = g_physDown[KeySlot(c.from.mods[i])];
-        if (all)
+        if (ChordMatches(c.from, g_physDown, g_physCount, /*exact=*/true))
             return &c;
     }
     return nullptr;
@@ -325,12 +322,12 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
     // Physical key state, kept before any early return so it can never drift.
     // Autorepeat must not double-count.
     if (down) {
-        if (!g_physDown[slot]) {
-            g_physDown[slot] = true;
+        if (g_physDown[slot] == KeyOrigin::Any) {
+            g_physDown[slot] = KeyOrigin::Physical;
             ++g_physCount;
         }
-    } else if (g_physDown[slot]) {
-        g_physDown[slot] = false;
+    } else if (g_physDown[slot] != KeyOrigin::Any) {
+        g_physDown[slot] = KeyOrigin::Any;
         if (g_physCount > 0)
             --g_physCount;
     }

@@ -6,8 +6,9 @@
 
 // ------------------------------------------------------------ key naming
 
-// Printable name for a physical key ("Caps Lock", "Right Alt", "H").
-const wchar_t* KeyName(KeyId id);
+// Key naming and chord text come from keychord.
+using keychord::DescribeChord;
+using keychord::KeyName;
 // "Caps Lock -> Backspace" style, ASCII, for the comments in mackeys.ini.
 std::string DescribeBindAscii(KeyId id, const Bind& bind);
 // What a bind does, for the picker's status line.
@@ -64,18 +65,8 @@ bool ForwardCaptureKey(KeyId id, bool down);
 
 // ------------------------------------------------------------------ chords
 
-std::wstring DescribeChord(const KeyChord& chord);         // "Left Ctrl + Space"
 std::wstring DescribeChordAction(const ChordBinding& b); // "Start menu"
 std::wstring DescribeChordBinding(const ChordBinding& b);
 std::string DescribeChordBindingAscii(const ChordBinding& b);
 
-// Chord capture for the Options tab. Arming swallows every keystroke; the
-// chord completes when the last key is released, so the trigger is whichever
-// key was pressed last. Esc as the first key cancels, as does a click, focus
-// loss, or the same 15-second timeout the picker uses.
-constexpr UINT CHM_CAPTURED = WM_USER + 110;
-constexpr UINT CHM_CANCELLED = WM_USER + 111;
 
-bool BeginChordCapture(HWND notify);
-void CancelChordCapture();
-KeyChord CapturedChord();

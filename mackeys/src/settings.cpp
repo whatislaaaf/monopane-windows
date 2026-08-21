@@ -98,7 +98,7 @@ void SetChordHint(HWND dlg, const wchar_t* text)
 
 void EndChordCapture(HWND dlg, DlgState* st)
 {
-    CancelChordCapture();
+    keychord::CancelChordCapture();
     st->chordIndex = -1;
     st->chordStage = 0;
     st->chordIsNew = false;
@@ -115,7 +115,7 @@ void StartChordCapture(HWND dlg, DlgState* st, int index, int stage, bool isNew)
         ? L"Hold the modifiers and press the trigger key, then let go. "
           L"Left and right are told apart.  (Esc cancels)"
         : L"Now press the chord it should send, then let go.  (Esc cancels)");
-    if (!BeginChordCapture(dlg))
+    if (!keychord::BeginChordCapture(dlg))
         EndChordCapture(dlg, st);
 }
 
@@ -170,27 +170,27 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
         return TRUE;
     }
 
-    case CHM_CAPTURED: {
+    case keychord::WM_CHORD_CAPTURED: {
         if (!st || st->chordIndex < 0 ||
             st->chordIndex >= static_cast<int>(st->work.chords.size()))
             return TRUE;
         ChordBinding& binding = st->work.chords[st->chordIndex];
         if (st->chordStage == 0) {
-            binding.from = CapturedChord();
+            binding.from = keychord::CapturedChord();
             if (binding.action == ChordAction::SendChord) {
                 // A send needs both halves; go straight on to the second.
                 StartChordCapture(dlg, st, st->chordIndex, 1, st->chordIsNew);
                 return TRUE;
             }
         } else {
-            binding.to = CapturedChord();
+            binding.to = keychord::CapturedChord();
         }
         EndChordCapture(dlg, st);
         SetChordHint(dlg, L"Captured.");
         return TRUE;
     }
 
-    case CHM_CANCELLED:
+    case keychord::WM_CHORD_CANCELLED:
         if (!st)
             return TRUE;
         // A half-built entry would otherwise linger with no keys attached.
@@ -206,7 +206,7 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
     // indefinitely.
     case WM_TIMER:
         if (st && st->chordIndex >= 0)
-            PostMessageW(dlg, CHM_CANCELLED, 0, 0);
+            PostMessageW(dlg, keychord::WM_CHORD_CANCELLED, 0, 0);
         return TRUE;
 
     case WM_COMMAND:
@@ -400,7 +400,7 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_DESTROY:
         // Closing while a capture is armed would leave the hook swallowing
         // every keystroke with nowhere to deliver it.
-        CancelChordCapture();
+        keychord::CancelChordCapture();
         if (st) {
             delete st;
             SetWindowLongPtrW(dlg, DWLP_USER, 0);

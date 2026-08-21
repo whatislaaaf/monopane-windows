@@ -101,45 +101,6 @@ std::string FormatAction(const Bind& b)
     return "none";
 }
 
-// A chord is written as its keys joined by '+', the last one being the
-// trigger: "1D+39" is left ctrl held, then space.
-bool ParseChord(const std::string& s, KeyChord& out)
-{
-    out = KeyChord();
-    size_t pos = 0;
-    while (pos <= s.size()) {
-        size_t plus = s.find('+', pos);
-        if (plus == std::string::npos)
-            plus = s.size();
-        std::string piece = s.substr(pos, plus - pos);
-        Trim(piece);
-        pos = plus + 1;
-
-        unsigned key = 0;
-        if (!ParseHex(piece, key) || key == 0)
-            return false;
-        // Everything parsed so far is a modifier; the last one wins the
-        // trigger slot as the loop unwinds.
-        if (ChordValid(out)) {
-            if (out.modCount >= kMaxChordMods)
-                return false;
-            out.mods[out.modCount++] = out.trigger;
-        }
-        out.trigger = static_cast<KeyId>(key);
-        if (plus == s.size())
-            break;
-    }
-    return ChordValid(out);
-}
-
-std::string FormatChord(const KeyChord& c)
-{
-    std::string out;
-    for (uint8_t i = 0; i < c.modCount; ++i)
-        out += FormatKeyId(c.mods[i]) + "+";
-    return out + FormatKeyId(c.trigger);
-}
-
 bool ReadWholeFile(const std::wstring& path, std::string& out)
 {
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,

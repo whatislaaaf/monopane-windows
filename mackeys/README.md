@@ -212,6 +212,17 @@ no longer matches and offer to remove it.
 
 Requires Visual Studio with the C++ workload.
 
+Key identity, chord text and hotkey capture live in the
+[keychord](https://github.com/whatislaaaf/keychord) submodule, shared with
+[Monopane](https://github.com/whatislaaaf/monopane-windows), so a fresh clone
+needs:
+
+```
+git submodule update --init
+```
+
+Then:
+
 ```
 build.bat
 ```

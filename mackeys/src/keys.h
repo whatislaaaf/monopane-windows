@@ -2,26 +2,23 @@
 #include <windows.h>
 #include <stdint.h>
 
-// A physical key is identified by its set-1 scancode, with extended keys
-// carrying the 0xE0 prefix (right ctrl = 0xE01D). Virtual-key codes are
-// deliberately avoided as identities: they move with the keyboard layout and
-// merge left/right pairs, both of which matter here.
-typedef uint16_t KeyId;
+#include "../external/keychord/keychord.h"
 
-constexpr KeyId kNoKey = 0;
-
-inline KeyId MakeKeyId(DWORD scanCode, bool extended)
-{
-    const KeyId sc = static_cast<KeyId>(scanCode & 0xFF);
-    return extended ? static_cast<KeyId>(0xE000 | sc) : sc;
-}
-
-inline bool KeyIsExtended(KeyId id) { return (id & 0xFF00) == 0xE000; }
-
-// Dense index into the 512-entry bind and state tables.
-inline int KeySlot(KeyId id) { return (id & 0xFF) | (KeyIsExtended(id) ? 0x100 : 0); }
-
-constexpr int kKeySlots = 512;
+// Key identity, chords and capture are shared with Monopane through the
+// keychord submodule; what stays here is what only MacKeys does with them.
+using keychord::ChordValid;
+using keychord::ChordMatches;
+using keychord::FormatChord;
+using keychord::ParseChord;
+using keychord::KeyChord;
+using keychord::KeyId;
+using keychord::KeyIsExtended;
+using keychord::KeyOrigin;
+using keychord::KeySlot;
+using keychord::kKeySlots;
+using keychord::kMaxChordMods;
+using keychord::kNoKey;
+using keychord::MakeKeyId;
 
 enum class Action : uint8_t {
     None = 0,     // unbound — passes through untouched
@@ -46,21 +43,7 @@ constexpr KeyId kSpareF24 = 0x76;
 constexpr KeyId kScLeftWin = 0xE05B;
 constexpr KeyId kScRightWin = 0xE05C;
 
-// ---------------------------------------------------------------- chords
-
-// A hotkey: some physical modifier keys held, then a trigger key. Modifiers
-// are physical keys (scancodes), not the virtual keys they may be remapped
-// into, so "Left Ctrl" means the key in the Ctrl position whatever it now
-// sends — the same rule the picker uses.
-constexpr int kMaxChordMods = 4;
-
-struct KeyChord {
-    KeyId mods[kMaxChordMods] = {};
-    uint8_t modCount = 0;
-    KeyId trigger = kNoKey;
-};
-
-inline bool ChordValid(const KeyChord& c) { return c.trigger != kNoKey; }
+// ---------------------------------------------------------------- hotkeys
 
 enum class ChordAction : uint8_t {
     None = 0,

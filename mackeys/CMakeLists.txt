@@ -9,6 +9,9 @@ add_executable(mackeys WIN32
     src/config.cpp
     src/keyboard.cpp
     src/scancodemap.cpp
+    external/keychord/keychord_name.cpp
+    external/keychord/keychord_chord.cpp
+    external/keychord/keychord_capture.cpp
     src/settings.cpp
     res/mackeys.rc
 )
