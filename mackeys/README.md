@@ -208,6 +208,55 @@ that role yet, the language chord is dropped — add it in the Hotkeys list.
 If the old hand-written Scancode Map is still installed, MacKeys will notice it
 no longer matches and offer to remove it.
 
+## The Mac side
+
+[`karabiner/karabiner.json`](karabiner/karabiner.json) is a Karabiner-Elements
+config that mirrors this setup on macOS, for the same keyboard on the same desk
+through a KVM. Copy it to `~/.config/karabiner/karabiner.json`.
+
+(The config for the old MX Keys Mini is not reproduced here; it is in this
+repo's history at commit `a55a114`.)
+
+| Physical key | Windows (MacKeys) | macOS (Karabiner) |
+| --- | --- | --- |
+| Caps Lock | Backspace | Backspace |
+| Left Ctrl | Left Alt | **Option** |
+| Win | Left Ctrl | **Control** |
+| Left Alt | Ctrl / Mac-cmd role | **Command** |
+| Right Alt | nav layer | nav layer |
+| Menu | Windows key | left alone — macOS has no counterpart |
+| Right Ctrl | Right Ctrl | Right Control |
+| leftmost + Space | Start menu | **Spotlight** |
+| command key + Space | switch input language | **switch input source** |
+
+Nav layer `u` / `o` switch virtual desktops on Windows and Spaces on macOS
+(`Ctrl+←` / `Ctrl+→`), which is the same gesture either side.
+
+Two consequences worth knowing:
+
+- **The bottom row is Option, Control, Command** — not a Mac keyboard's
+  Control, Option, Command. That is what mirroring your Windows arrangement
+  means; positions 1 and 2 stay swapped relative to stock macOS.
+- **`Cmd+Space` no longer opens Spotlight**, it switches input source. Spotlight
+  moves to the leftmost bottom-row key, matching Windows. Deleting the two
+  manipulators in the *Space chords* rule restores the macOS defaults.
+
+The modifier swap lives in `complex_modifications` rather than
+`simple_modifications` deliberately: the Space chords have to see the swapped
+modifier, and keeping both in the same stage makes that unambiguous.
+
+The Mac-side editing chords need no rules — option+arrow for word jump and
+cmd+arrow for line and document ends are native to macOS. MacKeys has to
+synthesise them on Windows, which is why they exist there and not here. The old
+config's `fn_function_keys` block (Mission Control, Launchpad, illumination) was
+specific to the MX Keys Mini and is dropped.
+
+No `devices` block, on purpose: through a KVM the keyboard often reports the
+switch's own vendor and product ids rather than the G915's, and those can change
+with a firmware update or a different port — a device-scoped rule would then
+silently stop applying. The Mac mini has no built-in keyboard to protect, so
+profile-wide is both simpler and more robust.
+
 ## Build
 
 Requires Visual Studio with the C++ workload.
