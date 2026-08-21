@@ -1,36 +1,55 @@
-// MacKeys — replicates a Karabiner-Elements setup on Windows.
+// MacKeys — a configurable Mac-style key remapper for Windows.
 //
-// Mappings (all keyboards, physical keys only — injected input passes through;
-// the first three are toggleable in Settings):
-//   Caps Lock            -> Backspace
-//   Left cmd  (F23 via Scancode Map, or Left Win) -> Left Ctrl (Mac copy/paste)
-//   Right option (Right Win via Scancode Map)     -> real Windows key
-//   Right cmd (F24 via Scancode Map, or Right Win)
-//                        -> nav layer, swallowed when tapped alone:
-//        h -> Home    ; -> End
-//        j -> Left    k -> Down    i -> Up    l -> Right
-//        u -> Ctrl+Win+Left  (previous virtual desktop)
-//        o -> Ctrl+Win+Right (next virtual desktop)
-//   Other held modifiers (Shift, Ctrl, ...) pass through, so
-//   layer+Shift+j selects text leftwards, matching Karabiner's optional-any.
+// Every mapping lives in %APPDATA%\MacKeys\mackeys.ini and is edited on a
+// picture of the keyboard in Settings. Two tables drive the hook: `base`
+// applies always, `nav` applies only while a key bound to `layer` is held.
+// Injected input passes through untouched, so other automation tools are not
+// re-remapped.
+//
+// The only remapping that cannot happen here is a Win key doing a non-Windows
+// job: Win+L is handled below keyboard hooks, so those keys are diverted onto
+// spare scancodes by the kernel Scancode Map instead (see scancodemap.h) and
+// aliased back to their physical identity on the way in.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shellapi.h>
 
-#include "settings.h"
+#include <vector>
+
 #include "../res/resource.h"
+#include "config.h"
+#include "keyboard.h"
+#include "keys.h"
+#include "scancodemap.h"
+#include "settings.h"
 
 namespace {
 
 constexpr ULONG_PTR kInjectMarker = 0x4D4B5953; // "MKYS"
-constexpr BYTE kSwallowUpOnly = 0xFF;           // keyup consumed, nothing sent
+constexpr KeyId kSwallowUpOnly = 0xFFFF;        // keyup consumed, nothing sent
 
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kTrayId = 1;
 constexpr UINT kCmdSettings = 1;
 constexpr UINT kCmdPause = 2;
-constexpr UINT kCmdExit = 3;
+constexpr UINT kCmdResetMap = 3;
+constexpr UINT kCmdExit = 4;
+
+// Scancodes the chord helpers need by name.
+constexpr KeyId kScLCtrl = 0x1D;
+constexpr KeyId kScLAlt = 0x38;
+constexpr KeyId kScRAlt = 0xE038;
+constexpr KeyId kScSpace = 0x39;
+constexpr KeyId kScLeft = 0xE04B;
+constexpr KeyId kScRight = 0xE04D;
+constexpr KeyId kScUp = 0xE048;
+constexpr KeyId kScDown = 0xE050;
+constexpr KeyId kScHome = 0xE047;
+constexpr KeyId kScEnd = 0xE04F;
+
+// The fake left-ctrl that AltGr layouts emit alongside every right alt.
+constexpr DWORD kAltGrFillerScan = 0x21D;
 
 const wchar_t kWindowClass[] = L"MacKeysHiddenWindow";
 
@@ -40,42 +59,50 @@ NOTIFYICONDATAW g_nid = {};
 UINT g_taskbarCreatedMsg = 0;
 bool g_paused = false;
 bool g_settingsOpen = false;
-bool g_rwinDown = false;
-bool g_raltDown = false;
-bool g_lwinDown = false;      // physical left cmd (remapped to Ctrl) is held
-bool g_altChordUsed = false;  // an alt-masked chord ran; mask the coming alt-up
-// Per physical vk: mapped vk we sent on keydown, so the matching keyup is
+
+// Live copies of the config, so the hook never touches a table being edited.
+Bind g_base[kKeySlots];
+Bind g_nav[kKeySlots];
+// Keys the Scancode Map diverted, mapped back to their physical identity.
+KeyId g_alias[kKeySlots];
+
+std::vector<ChordBinding> g_chords;
+// Which physical keys are down, for exact chord matching. Tracked here rather
+// than read from GetAsyncKeyState because that reports the *virtual* keys —
+// merging left and right Ctrl, and seeing the Ctrl a remap injects as though
+// the user had pressed a real Ctrl key.
+bool g_physDown[kKeySlots] = {};
+int g_physCount = 0;
+
+int g_layerHeld = 0;         // number of held layer keys
+bool g_ctrlSwapDown = false; // a key acting as Ctrl (Mac cmd) is held
+bool g_altChordUsed = false; // an alt-masked chord ran; mask the coming alt-up
+// Per physical key: what we sent on keydown, so the matching keyup is
 // translated even if the layer key was released first.
-BYTE g_translated[256] = {};
+KeyId g_translated[kKeySlots] = {};
 
-bool IsExtendedVk(WORD vk) {
-    switch (vk) {
-    case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
-    case VK_HOME: case VK_END: case VK_LWIN: case VK_RWIN:
-        return true;
-    }
-    return false;
-}
-
-void FillKeyInput(INPUT& in, WORD vk, bool down) {
+void FillKeyInput(INPUT& in, KeyId id, bool down)
+{
     in.type = INPUT_KEYBOARD;
-    in.ki.wVk = vk;
-    in.ki.wScan = static_cast<WORD>(MapVirtualKeyW(vk, MAPVK_VK_TO_VSC));
-    in.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
-    if (IsExtendedVk(vk))
+    in.ki.wVk = 0;
+    in.ki.wScan = static_cast<WORD>(id & 0xFF);
+    in.ki.dwFlags = KEYEVENTF_SCANCODE | (down ? 0 : KEYEVENTF_KEYUP);
+    if (KeyIsExtended(id))
         in.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
     in.ki.dwExtraInfo = kInjectMarker;
 }
 
-void SendVk(WORD vk, bool down) {
+void SendKey(KeyId id, bool down)
+{
     INPUT in = {};
-    FillKeyInput(in, vk, down);
+    FillKeyInput(in, id, down);
     SendInput(1, &in, sizeof(in));
 }
 
 // One atomic Ctrl+Win+Arrow chord for virtual desktop switching.
-void SendDesktopSwitch(WORD arrowVk) {
-    const WORD sequence[] = { VK_LCONTROL, VK_LWIN, arrowVk };
+void SendDesktopSwitch(KeyId arrow)
+{
+    const KeyId sequence[] = { kScLCtrl, kScLeftWin, arrow };
     INPUT in[6] = {};
     for (int i = 0; i < 3; ++i)
         FillKeyInput(in[i], sequence[i], true);
@@ -84,35 +111,38 @@ void SendDesktopSwitch(WORD arrowVk) {
     SendInput(6, in, sizeof(INPUT));
 }
 
-bool AltHeld() {
+bool AltHeld()
+{
     if (GetAsyncKeyState(VK_LMENU) & 0x8000)
         return true;
-    // Right option counts as plain Alt only when it is not a layer key.
-    if (!g_settings.rightOptLayer && (GetAsyncKeyState(VK_RMENU) & 0x8000))
+    // Right alt only counts as plain Alt while it has no job of its own.
+    if (g_base[KeySlot(kScRAlt)].action == Action::None &&
+        (GetAsyncKeyState(VK_RMENU) & 0x8000))
         return true;
     return false;
 }
 
-// Send one tap of `vk`, optionally wrapped in Ctrl, while temporarily lifting
-// held Alt (and/or the Ctrl coming from the left-cmd remap) so the app on the
+// Send one tap of `id`, optionally wrapped in Ctrl, while temporarily lifting
+// held Alt (and/or the Ctrl coming from the Mac-cmd remap) so the app on the
 // receiving end sees exactly the Mac-style editing chord and nothing else.
-void SendNavChord(WORD vk, bool withCtrl, bool maskAlt, bool maskCtrl) {
+void SendNavChord(KeyId id, bool withCtrl, bool maskAlt, bool maskCtrl)
+{
     INPUT in[10];
     int n = 0;
-    auto add = [&](WORD key, bool down) { FillKeyInput(in[n++], key, down); };
-    const bool altL = maskAlt && (GetAsyncKeyState(VK_LMENU) & 0x8000);
-    const bool altR = maskAlt && (GetAsyncKeyState(VK_RMENU) & 0x8000);
+    auto add = [&](KeyId key, bool down) { FillKeyInput(in[n++], key, down); };
+    const bool altL = maskAlt && (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0;
+    const bool altR = maskAlt && (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
     // Ctrl goes down before any alt-up so the release cannot focus a menu bar.
-    if (withCtrl) add(VK_LCONTROL, true);
-    if (altL) add(VK_LMENU, false);
-    if (altR) add(VK_RMENU, false);
-    if (maskCtrl) add(VK_LCONTROL, false);
-    add(vk, true);
-    add(vk, false);
-    if (maskCtrl) add(VK_LCONTROL, true);
-    if (altR) add(VK_RMENU, true);
-    if (altL) add(VK_LMENU, true);
-    if (withCtrl) add(VK_LCONTROL, false);
+    if (withCtrl) add(kScLCtrl, true);
+    if (altL) add(kScLAlt, false);
+    if (altR) add(kScRAlt, false);
+    if (maskCtrl) add(kScLCtrl, false);
+    add(id, true);
+    add(id, false);
+    if (maskCtrl) add(kScLCtrl, true);
+    if (altR) add(kScRAlt, true);
+    if (altL) add(kScLAlt, true);
+    if (withCtrl) add(kScLCtrl, false);
     SendInput(n, in, sizeof(INPUT));
     if (altL || altR)
         g_altChordUsed = true;
@@ -121,169 +151,281 @@ void SendNavChord(WORD vk, bool withCtrl, bool maskAlt, bool maskCtrl) {
 // Tap the Win key to toggle the Start menu, temporarily lifting held Ctrl
 // (Ctrl+Win is a no-op, so the chord must arrive as a bare Win tap). With
 // `withSpace`, sends Win+Space instead — the input-language switcher.
-void SendWinTap(bool withSpace) {
+void SendWinTap(bool withSpace)
+{
     INPUT in[8];
     int n = 0;
-    auto add = [&](WORD key, bool down) { FillKeyInput(in[n++], key, down); };
+    auto add = [&](KeyId key, bool down) { FillKeyInput(in[n++], key, down); };
     const bool lc = (GetAsyncKeyState(VK_LCONTROL) & 0x8000) != 0;
     const bool rc = (GetAsyncKeyState(VK_RCONTROL) & 0x8000) != 0;
-    if (lc) add(VK_LCONTROL, false);
-    if (rc) add(VK_RCONTROL, false);
-    add(VK_LWIN, true);
+    if (lc) add(kScLCtrl, false);
+    if (rc) add(0xE01D, false);
+    add(kScLeftWin, true);
     if (withSpace) {
-        add(VK_SPACE, true);
-        add(VK_SPACE, false);
+        add(kScSpace, true);
+        add(kScSpace, false);
     }
-    add(VK_LWIN, false);
-    if (rc) add(VK_RCONTROL, true);
-    if (lc) add(VK_LCONTROL, true);
+    add(kScLeftWin, false);
+    if (rc) add(0xE01D, true);
+    if (lc) add(kScLCtrl, true);
     SendInput(n, in, sizeof(INPUT));
 }
 
 // After an alt-masked chord, the re-pressed Alt would focus the menu bar on
 // its physical release; a Ctrl tap right before the alt-up defuses that.
-void MaskAltUpIfNeeded() {
+void MaskAltUpIfNeeded()
+{
     if (!g_altChordUsed)
         return;
     g_altChordUsed = false;
-    SendVk(VK_LCONTROL, true);
-    SendVk(VK_LCONTROL, false);
+    SendKey(kScLCtrl, true);
+    SendKey(kScLCtrl, false);
 }
 
-WORD LayerTarget(DWORD vk) {
-    switch (vk) {
-    case 'H': return VK_HOME;
-    case 'J': return VK_LEFT;
-    case 'K': return VK_DOWN;
-    case 'I': return VK_UP;
-    case 'L': return VK_RIGHT;
-    case VK_OEM_1: return VK_END; // ; on ANSI/ISO layouts
-    }
-    return 0;
-}
-
-void ReleaseTranslatedKeys() {
-    for (int vk = 0; vk < 256; ++vk) {
-        if (g_translated[vk]) {
-            if (g_translated[vk] != kSwallowUpOnly)
-                SendVk(g_translated[vk], false);
-            g_translated[vk] = 0;
+void ReleaseTranslatedKeys()
+{
+    for (int slot = 0; slot < kKeySlots; ++slot) {
+        if (g_translated[slot]) {
+            if (g_translated[slot] != kSwallowUpOnly)
+                SendKey(g_translated[slot], false);
+            g_translated[slot] = 0;
         }
     }
-    g_rwinDown = false;
-    g_raltDown = false;
-    if (g_lwinDown) {
-        SendVk(VK_LCONTROL, false); // release the Ctrl held by the cmd remap
-        g_lwinDown = false;
+    g_layerHeld = 0;
+    for (int slot = 0; slot < kKeySlots; ++slot)
+        g_physDown[slot] = false;
+    g_physCount = 0;
+    if (g_ctrlSwapDown) {
+        SendKey(kScLCtrl, false); // release the Ctrl held by the Mac-cmd remap
+        g_ctrlSwapDown = false;
     }
 }
 
-LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
+bool IsHorizontalArrow(KeyId id) { return id == kScLeft || id == kScRight; }
+bool IsVerticalArrow(KeyId id) { return id == kScUp || id == kScDown; }
+
+// ------------------------------------------------------------------ chords
+
+// What a held physical key currently has down as far as Windows is concerned,
+// which is not the key itself once it has been remapped.
+KeyId EffectiveDown(KeyId physical)
+{
+    const Bind& b = g_base[KeySlot(physical)];
+    switch (b.action) {
+    case Action::None:     return physical;
+    case Action::Key:      return b.target;
+    case Action::CtrlSwap: return kScLCtrl;
+    default:               return kNoKey; // layer/win keys hold nothing
+    }
+}
+
+// Send `to` as a chord, first lifting whatever the trigger's own modifiers are
+// holding down so the receiving app sees the output and nothing else.
+void SendOutputChord(const KeyChord& from, const KeyChord& to)
+{
+    INPUT in[24];
+    int n = 0;
+    auto add = [&](KeyId key, bool down) { FillKeyInput(in[n++], key, down); };
+
+    KeyId lifted[kMaxChordMods];
+    int liftCount = 0;
+    for (uint8_t i = 0; i < from.modCount; ++i) {
+        const KeyId eff = EffectiveDown(from.mods[i]);
+        if (eff == kNoKey)
+            continue;
+        bool wanted = false;
+        for (uint8_t j = 0; j < to.modCount; ++j)
+            wanted = wanted || to.mods[j] == eff;
+        if (!wanted && liftCount < kMaxChordMods)
+            lifted[liftCount++] = eff;
+    }
+
+    for (int i = 0; i < liftCount; ++i) {
+        add(lifted[i], false);
+        if (lifted[i] == kScLAlt || lifted[i] == kScRAlt)
+            g_altChordUsed = true;
+    }
+    for (uint8_t i = 0; i < to.modCount; ++i)
+        add(to.mods[i], true);
+    add(to.trigger, true);
+    add(to.trigger, false);
+    for (int i = to.modCount; i > 0; --i)
+        add(to.mods[i - 1], false);
+    for (int i = liftCount; i > 0; --i)
+        add(lifted[i - 1], true);
+    SendInput(n, in, sizeof(INPUT));
+}
+
+void RunChord(const ChordBinding& binding)
+{
+    switch (binding.action) {
+    case ChordAction::StartMenu:     SendWinTap(false); break;
+    case ChordAction::InputLanguage: SendWinTap(true); break;
+    case ChordAction::SendChord:     SendOutputChord(binding.from, binding.to); break;
+    case ChordAction::None:          break;
+    }
+}
+
+// Exact match: every listed modifier must be down and nothing else may be, so
+// Left Ctrl + Space is distinct from Right Ctrl + Space and from
+// Ctrl + Shift + Space. `g_physCount` already includes the trigger.
+const ChordBinding* MatchChord(KeyId trigger)
+{
+    for (const ChordBinding& c : g_chords) {
+        if (c.from.trigger != trigger || g_physCount != c.from.modCount + 1)
+            continue;
+        bool all = true;
+        for (uint8_t i = 0; i < c.from.modCount && all; ++i)
+            all = g_physDown[KeySlot(c.from.mods[i])];
+        if (all)
+            return &c;
+    }
+    return nullptr;
+}
+
+LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
+{
     if (code != HC_ACTION)
         return CallNextHookEx(g_hook, code, wParam, lParam);
 
     const auto* k = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
-    if ((k->flags & LLKHF_INJECTED) || g_paused)
+    if (k->flags & LLKHF_INJECTED)
         return CallNextHookEx(g_hook, code, wParam, lParam);
 
     const bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
 
-    switch (k->vkCode) {
-    case VK_CAPITAL:
-        if (!g_settings.capsAsBackspace)
-            break;
-        SendVk(VK_BACK, down);
-        return 1;
-    case VK_LWIN:
-    case VK_F23: // left cmd after the kernel Scancode Map remap (see README)
-        if (!g_settings.leftCmdAsCtrl)
-            break;
-        g_lwinDown = down;
-        SendVk(VK_LCONTROL, down);
-        return 1;
-    case VK_F24: // right cmd after the kernel Scancode Map remap (see README)
-        g_rwinDown = down;
-        return 1;
-    case VK_RWIN: // right option after the remap (right cmd arrives as F24)
-        if (!g_settings.rightOptLayer)
-            break; // acts as a real Windows key
-        g_raltDown = down;
-        return 1;
-    case VK_RMENU: // right option before the remap / on other keyboards
-        if (!g_settings.rightOptLayer) {
-            if (!down)
-                MaskAltUpIfNeeded();
-            break;
-        }
-        g_raltDown = down;
-        return 1;
-    case VK_LMENU:
-        if (!down)
-            MaskAltUpIfNeeded();
-        break;
-    case VK_LCONTROL:
-        // AltGr layouts emit a fake LCtrl (scan 0x21D) with every right alt;
-        // drop it so it can't leak into layer navigation.
-        if (g_settings.rightOptLayer && k->scanCode == 0x21D)
+    // The settings picker takes raw keystrokes ahead of everything, including
+    // the pause state, and swallows them so nothing else reacts.
+    {
+        const KeyId raw = MakeKeyId(k->scanCode, (k->flags & LLKHF_EXTENDED) != 0);
+        if (CaptureActive() && ForwardCaptureKey(raw, down))
             return 1;
-        break;
-    case VK_SPACE:
-        if (!down)
-            break; // the keyup is swallowed via g_translated below
-        if (g_lwinDown && g_settings.cmdSpaceLang) {
-            // Left cmd+Space = input-language switcher (Win+Space), like Mac.
-            if (!g_translated[VK_SPACE]) // ignore autorepeat while held
-                SendWinTap(true);
-            g_translated[VK_SPACE] = kSwallowUpOnly;
+    }
+
+    if (g_paused)
+        return CallNextHookEx(g_hook, code, wParam, lParam);
+
+    // AltGr layouts emit a fake left ctrl with every right alt; it would
+    // otherwise look exactly like a real one and leak into the layer.
+    if (k->scanCode == kAltGrFillerScan) {
+        if (g_base[KeySlot(kScRAlt)].action != Action::None)
             return 1;
+        return CallNextHookEx(g_hook, code, wParam, lParam);
+    }
+
+    KeyId id = MakeKeyId(k->scanCode, (k->flags & LLKHF_EXTENDED) != 0);
+    // Undo a kernel divert, so bindings stay keyed to the physical key the
+    // user clicked on the picture rather than the spare it now arrives as.
+    if (const KeyId original = g_alias[KeySlot(id)])
+        id = original;
+
+    const int slot = KeySlot(id);
+    const Bind& base = g_base[slot];
+
+    // Physical key state, kept before any early return so it can never drift.
+    // Autorepeat must not double-count.
+    if (down) {
+        if (!g_physDown[slot]) {
+            g_physDown[slot] = true;
+            ++g_physCount;
         }
-        if (g_settings.ctrlSpaceStart && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) {
-            if (!g_translated[VK_SPACE])
-                SendWinTap(false);
-            g_translated[VK_SPACE] = kSwallowUpOnly;
-            return 1;
+    } else if (g_physDown[slot]) {
+        g_physDown[slot] = false;
+        if (g_physCount > 0)
+            --g_physCount;
+    }
+
+    // ------------------------------------------------------ modifier roles
+
+    switch (base.action) {
+    case Action::Layer:
+        if (down) {
+            if (!g_translated[slot]) {
+                ++g_layerHeld;
+                g_translated[slot] = kSwallowUpOnly;
+            }
+        } else if (g_translated[slot]) {
+            g_translated[slot] = 0;
+            if (g_layerHeld > 0)
+                --g_layerHeld;
         }
+        return 1; // swallowed, so a lone tap does nothing
+    case Action::CtrlSwap:
+        g_ctrlSwapDown = down;
+        SendKey(kScLCtrl, down);
+        return 1;
+    case Action::WinKey:
+        // The Scancode Map already turned this into a real Windows key; the
+        // hook must keep its hands off it.
+        return CallNextHookEx(g_hook, code, wParam, lParam);
+    default:
         break;
     }
 
+    // Alt releases need defusing whether or not alt itself is remapped.
+    if (!down && (id == kScLAlt || id == kScRAlt))
+        MaskAltUpIfNeeded();
+
+    // ------------------------------------------------------------- chords
+
+    if (down) {
+        if (const ChordBinding* chord = MatchChord(id)) {
+            if (!g_translated[slot]) // ignore autorepeat while held
+                RunChord(*chord);
+            g_translated[slot] = kSwallowUpOnly;
+            return 1;
+        }
+    }
+
+    // ------------------------------------------------------- key movement
+
     if (!down) {
-        const BYTE sent = g_translated[k->vkCode & 0xFF];
+        const KeyId sent = g_translated[slot];
         if (sent) {
-            g_translated[k->vkCode & 0xFF] = 0;
+            g_translated[slot] = 0;
             if (sent != kSwallowUpOnly)
-                SendVk(sent, false);
+                SendKey(sent, false);
             return 1;
         }
-    } else if (g_rwinDown || g_raltDown) {
-        if (const WORD target = LayerTarget(k->vkCode)) {
-            const bool horizontal = target == VK_LEFT || target == VK_RIGHT;
-            const bool vertical = target == VK_UP || target == VK_DOWN;
-            if ((horizontal || vertical) && g_lwinDown) {
-                // Mac cmd+arrow: j/l = line start/end, i/k = document
-                // start/end. The remapped Ctrl stays down for i/k (making
-                // Ctrl+Home/End) but is masked for j/l.
-                const WORD dest =
-                    (target == VK_LEFT || target == VK_UP) ? VK_HOME : VK_END;
-                SendNavChord(dest, false, false, horizontal);
-                g_translated[k->vkCode & 0xFF] = kSwallowUpOnly;
-                return 1;
-            }
-            if ((horizontal || vertical) && AltHeld()) {
-                // Mac option+arrow: word jump (j/l), paragraph-ish (i/k) —
-                // Windows spells both as Ctrl+arrow.
-                SendNavChord(target, true, true, false);
-                g_translated[k->vkCode & 0xFF] = kSwallowUpOnly;
-                return 1;
-            }
-            g_translated[k->vkCode & 0xFF] = static_cast<BYTE>(target);
-            SendVk(target, true);
+        return CallNextHookEx(g_hook, code, wParam, lParam);
+    }
+
+    const Bind& active = g_layerHeld > 0 && g_nav[slot].action != Action::None ? g_nav[slot]
+                                                                              : base;
+    switch (active.action) {
+    case Action::DesktopPrev:
+    case Action::DesktopNext:
+        g_translated[slot] = kSwallowUpOnly;
+        SendDesktopSwitch(active.action == Action::DesktopPrev ? kScLeft : kScRight);
+        return 1;
+
+    case Action::Key: {
+        const KeyId target = active.target;
+        const bool horizontal = IsHorizontalArrow(target);
+        const bool vertical = IsVerticalArrow(target);
+        if ((horizontal || vertical) && g_ctrlSwapDown) {
+            // Mac cmd+arrow: left/right = line start/end, up/down = document
+            // start/end. The remapped Ctrl stays down for up/down (making
+            // Ctrl+Home/End) but is masked for left/right.
+            const KeyId dest = (target == kScLeft || target == kScUp) ? kScHome : kScEnd;
+            SendNavChord(dest, false, false, horizontal);
+            g_translated[slot] = kSwallowUpOnly;
             return 1;
         }
-        if (k->vkCode == 'U' || k->vkCode == 'O') {
-            g_translated[k->vkCode & 0xFF] = kSwallowUpOnly;
-            SendDesktopSwitch(k->vkCode == 'U' ? VK_LEFT : VK_RIGHT);
+        if ((horizontal || vertical) && AltHeld()) {
+            // Mac option+arrow: word jump (left/right), paragraph-ish
+            // (up/down) — Windows spells both as Ctrl+arrow.
+            SendNavChord(target, true, true, false);
+            g_translated[slot] = kSwallowUpOnly;
             return 1;
         }
+        g_translated[slot] = target;
+        SendKey(target, true);
+        return 1;
+    }
+
+    default:
+        break;
     }
 
     return CallNextHookEx(g_hook, code, wParam, lParam);
@@ -291,24 +433,44 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
 
 // ------------------------------------------------------------------- tray
 
-void UpdateTrayTooltip(HWND hwnd) {
+void UpdateTrayTooltip(HWND hwnd)
+{
     lstrcpyW(g_nid.szTip, g_paused ? L"MacKeys (paused)" : L"MacKeys — Mac-style keys active");
     g_nid.hWnd = hwnd;
+    g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
 
-void OpenSettings(HWND hwnd) {
+void ShowBalloon(HWND hwnd, const wchar_t* title, const wchar_t* text)
+{
+    NOTIFYICONDATAW nid = g_nid;
+    nid.hWnd = hwnd;
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = NIIF_INFO;
+    lstrcpynW(nid.szInfoTitle, title, ARRAYSIZE(nid.szInfoTitle));
+    lstrcpynW(nid.szInfo, text, ARRAYSIZE(nid.szInfo));
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+void OpenSettings(HWND hwnd)
+{
     if (g_settingsOpen)
         return;
     g_settingsOpen = true;
+    // Anything held when the dialog opens would otherwise stay stuck down
+    // while the picker eats keystrokes.
+    ReleaseTranslatedKeys();
     ShowSettingsDialog(hwnd, g_instance);
     g_settingsOpen = false;
 }
 
-void ShowTrayMenu(HWND hwnd) {
+void ShowTrayMenu(HWND hwnd)
+{
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, kCmdSettings, L"Settings…");
     AppendMenuW(menu, MF_STRING | (g_paused ? MF_CHECKED : 0), kCmdPause, L"Pause remapping");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kCmdResetMap, L"Remove kernel Scancode Map…");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kCmdExit, L"Exit");
 
@@ -320,7 +482,8 @@ void ShowTrayMenu(HWND hwnd) {
     DestroyMenu(menu);
 }
 
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
     // Explorer (re)started — the tray was rebuilt, so re-add our icon. Also
     // covers autostart racing ahead of the taskbar right after logon.
     if (msg == g_taskbarCreatedMsg && g_taskbarCreatedMsg != 0) {
@@ -352,6 +515,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 ReleaseTranslatedKeys();
             UpdateTrayTooltip(hwnd);
             break;
+        case kCmdResetMap:
+            if (MessageBoxW(hwnd,
+                            L"Remove the kernel Scancode Map?\n\n"
+                            L"This restores stock behaviour for every key it remapped, "
+                            L"including any MacKeys relies on. Administrator rights are "
+                            L"required and the change takes effect at the next reboot.",
+                            L"MacKeys", MB_YESNO | MB_ICONWARNING) == IDYES) {
+                if (ResetScancodeMap())
+                    MessageBoxW(hwnd, L"Removed. Reboot to take effect.", L"MacKeys",
+                                MB_OK | MB_ICONINFORMATION);
+                else
+                    MessageBoxW(hwnd, L"Could not remove it (the elevation prompt was "
+                                      L"declined, or the write failed).",
+                                L"MacKeys", MB_OK | MB_ICONERROR);
+            }
+            break;
         case kCmdExit:
             DestroyWindow(hwnd);
             break;
@@ -367,17 +546,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 } // namespace
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+void OnConfigChanged()
+{
+    // Any key held under the old tables would never see its keyup translated.
+    ReleaseTranslatedKeys();
+
+    for (int i = 0; i < kKeySlots; ++i) {
+        g_base[i] = g_config.base[i];
+        g_nav[i] = g_config.nav[i];
+        g_alias[i] = kNoKey;
+    }
+    g_chords = g_config.chords;
+    const ScancodeMapPlan plan = BuildScancodeMap(g_config);
+    for (const Divert& d : plan.diverts)
+        g_alias[KeySlot(d.to)] = d.from;
+}
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
+{
     g_instance = instance;
 
     CreateMutexW(nullptr, TRUE, L"Local\\MacKeysSingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        MessageBoxW(nullptr, L"MacKeys is already running (check the tray).",
-                    L"MacKeys", MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(nullptr, L"MacKeys is already running (check the tray).", L"MacKeys",
+                    MB_OK | MB_ICONINFORMATION);
         return 0;
     }
 
-    LoadSettings();
+    LoadConfig();
+    OnConfigChanged();
+    RegisterKeyboardControl(instance);
     g_taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
 
     WNDCLASSW wc = {};
@@ -389,8 +587,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     // A normal (never shown) window rather than HWND_MESSAGE: message-only
     // windows don't receive the TaskbarCreated broadcast.
-    HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"MacKeys",
-                                WS_POPUP, 0, 0, 0, 0,
+    HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"MacKeys", WS_POPUP, 0, 0, 0, 0,
                                 nullptr, nullptr, instance, nullptr);
     if (!hwnd)
         return 1;
@@ -400,9 +597,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_nid.uID = kTrayId;
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     g_nid.uCallbackMessage = kTrayMessage;
-    g_nid.hIcon = static_cast<HICON>(LoadImageW(
-        instance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON,
-        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0));
+    g_nid.hIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON,
+                                                GetSystemMetrics(SM_CXSMICON),
+                                                GetSystemMetrics(SM_CYSMICON), 0));
     lstrcpyW(g_nid.szTip, L"MacKeys — Mac-style keys active");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
@@ -415,6 +612,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                     MB_OK | MB_ICONERROR);
         return 1;
     }
+
+    // A config needing a kernel remap that isn't installed yet works in every
+    // respect except Win+L, which is worth saying out loud rather than leaving
+    // the user to discover by locking their PC.
+    if (!ScancodeMapIsCurrent(BuildScancodeMap(g_config)))
+        ShowBalloon(hwnd, L"MacKeys",
+                    L"Your key setup needs a kernel remap that isn't installed yet. "
+                    L"Open Settings and click OK to write it.");
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

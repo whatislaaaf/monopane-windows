@@ -25,10 +25,10 @@ rc /nologo /fo build\mackeys.res res\mackeys.rc
 if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /O2 /W4 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX ^
-   src\main.cpp src\settings.cpp ^
+   src\main.cpp src\config.cpp src\keyboard.cpp src\scancodemap.cpp src\settings.cpp ^
    build\mackeys.res ^
    /Fo:build\ /Fe:build\mackeys.exe ^
-   /link user32.lib shell32.lib advapi32.lib /SUBSYSTEM:WINDOWS
+   /link user32.lib shell32.lib advapi32.lib comctl32.lib gdi32.lib /SUBSYSTEM:WINDOWS
 if errorlevel 1 exit /b 1
 
 echo.

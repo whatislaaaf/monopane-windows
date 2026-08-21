@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(mackeys WIN32
     src/main.cpp
+    src/config.cpp
+    src/keyboard.cpp
+    src/scancodemap.cpp
     src/settings.cpp
     res/mackeys.rc
 )
@@ -17,5 +20,5 @@ if(MSVC)
 endif()
 
 target_link_libraries(mackeys PRIVATE
-    user32 shell32 advapi32
+    user32 shell32 advapi32 comctl32 gdi32
 )
