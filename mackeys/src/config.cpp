@@ -396,8 +396,9 @@ bool SaveConfig()
             const KeyId id = static_cast<KeyId>((slot & 0x100) ? (0xE000 | (slot & 0xFF))
                                                                : (slot & 0xFF));
             std::string line = FormatKeyId(id) + " = " + FormatAction(table[slot]);
-            while (line.size() < 26)
+            do {
                 line += ' ';
+            } while (line.size() < 26);
             out += line + "# " + DescribeBindAscii(id, table[slot]) + "\r\n";
         }
     }
@@ -419,8 +420,11 @@ bool SaveConfig()
         std::string line = name + " = " + FormatChord(c.from);
         if (c.action == ChordAction::SendChord)
             line += " > " + FormatChord(c.to);
-        while (line.size() < 40)
+        // At least one space, however long the line already is, or the comment
+        // marker ends up flush against the value.
+        do {
             line += ' ';
+        } while (line.size() < 40);
         out += line + "# " + DescribeChordBindingAscii(c) + "\r\n";
     }
 

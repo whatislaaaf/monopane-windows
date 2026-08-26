@@ -148,26 +148,60 @@ void SendNavChord(KeyId id, bool withCtrl, bool maskAlt, bool maskCtrl)
         g_altChordUsed = true;
 }
 
-// Tap the Win key to toggle the Start menu, temporarily lifting held Ctrl
-// (Ctrl+Win is a no-op, so the chord must arrive as a bare Win tap). With
-// `withSpace`, sends Win+Space instead — the input-language switcher.
-void SendWinTap(bool withSpace)
+// What a held physical key currently has down as far as Windows is concerned,
+// which is not the key itself once it has been remapped.
+KeyId EffectiveDown(KeyId physical)
 {
-    INPUT in[8];
+    const Bind& b = g_base[KeySlot(physical)];
+    switch (b.action) {
+    case Action::None:     return physical;
+    case Action::Key:      return b.target;
+    case Action::CtrlSwap: return kScLCtrl;
+    default:               return kNoKey; // layer/win keys hold nothing
+    }
+}
+
+// The keys a chord's own modifiers are holding down right now. Asking the
+// bindings rather than GetAsyncKeyState is what makes this work whatever the
+// modifier has been remapped into: the key labelled Ctrl may be holding Alt.
+int HeldByChord(const KeyChord& from, KeyId* out, int max)
+{
+    int n = 0;
+    for (uint8_t i = 0; i < from.modCount && n < max; ++i) {
+        const KeyId eff = EffectiveDown(from.mods[i]);
+        if (eff != kNoKey)
+            out[n++] = eff;
+    }
+    return n;
+}
+
+// Tap the Win key to toggle the Start menu. Only a *bare* Win tap opens it —
+// Win with any modifier still down is either a different shortcut or nothing —
+// so whatever the chord's own modifiers are holding is lifted first and put
+// back after. With `withSpace`, sends Win+Space instead: the input-language
+// switcher.
+void SendWinTap(bool withSpace, const KeyChord& from)
+{
+    INPUT in[16];
     int n = 0;
     auto add = [&](KeyId key, bool down) { FillKeyInput(in[n++], key, down); };
-    const bool lc = (GetAsyncKeyState(VK_LCONTROL) & 0x8000) != 0;
-    const bool rc = (GetAsyncKeyState(VK_RCONTROL) & 0x8000) != 0;
-    if (lc) add(kScLCtrl, false);
-    if (rc) add(0xE01D, false);
+
+    KeyId lifted[kMaxChordMods];
+    const int liftCount = HeldByChord(from, lifted, kMaxChordMods);
+
+    for (int i = 0; i < liftCount; ++i) {
+        add(lifted[i], false);
+        if (lifted[i] == kScLAlt || lifted[i] == kScRAlt)
+            g_altChordUsed = true;
+    }
     add(kScLeftWin, true);
     if (withSpace) {
         add(kScSpace, true);
         add(kScSpace, false);
     }
     add(kScLeftWin, false);
-    if (rc) add(0xE01D, true);
-    if (lc) add(kScLCtrl, true);
+    for (int i = liftCount; i > 0; --i)
+        add(lifted[i - 1], true);
     SendInput(n, in, sizeof(INPUT));
 }
 
@@ -206,19 +240,6 @@ bool IsVerticalArrow(KeyId id) { return id == kScUp || id == kScDown; }
 
 // ------------------------------------------------------------------ chords
 
-// What a held physical key currently has down as far as Windows is concerned,
-// which is not the key itself once it has been remapped.
-KeyId EffectiveDown(KeyId physical)
-{
-    const Bind& b = g_base[KeySlot(physical)];
-    switch (b.action) {
-    case Action::None:     return physical;
-    case Action::Key:      return b.target;
-    case Action::CtrlSwap: return kScLCtrl;
-    default:               return kNoKey; // layer/win keys hold nothing
-    }
-}
-
 // Send `to` as a chord, first lifting whatever the trigger's own modifiers are
 // holding down so the receiving app sees the output and nothing else.
 void SendOutputChord(const KeyChord& from, const KeyChord& to)
@@ -227,17 +248,19 @@ void SendOutputChord(const KeyChord& from, const KeyChord& to)
     int n = 0;
     auto add = [&](KeyId key, bool down) { FillKeyInput(in[n++], key, down); };
 
+    KeyId held[kMaxChordMods];
+    const int heldCount = HeldByChord(from, held, kMaxChordMods);
+
+    // A modifier the output wants anyway stays down rather than being lifted
+    // and immediately re-pressed.
     KeyId lifted[kMaxChordMods];
     int liftCount = 0;
-    for (uint8_t i = 0; i < from.modCount; ++i) {
-        const KeyId eff = EffectiveDown(from.mods[i]);
-        if (eff == kNoKey)
-            continue;
+    for (int i = 0; i < heldCount; ++i) {
         bool wanted = false;
         for (uint8_t j = 0; j < to.modCount; ++j)
-            wanted = wanted || to.mods[j] == eff;
-        if (!wanted && liftCount < kMaxChordMods)
-            lifted[liftCount++] = eff;
+            wanted = wanted || to.mods[j] == held[i];
+        if (!wanted)
+            lifted[liftCount++] = held[i];
     }
 
     for (int i = 0; i < liftCount; ++i) {
@@ -259,8 +282,8 @@ void SendOutputChord(const KeyChord& from, const KeyChord& to)
 void RunChord(const ChordBinding& binding)
 {
     switch (binding.action) {
-    case ChordAction::StartMenu:     SendWinTap(false); break;
-    case ChordAction::InputLanguage: SendWinTap(true); break;
+    case ChordAction::StartMenu:     SendWinTap(false, binding.from); break;
+    case ChordAction::InputLanguage: SendWinTap(true, binding.from); break;
     case ChordAction::SendChord:     SendOutputChord(binding.from, binding.to); break;
     case ChordAction::None:          break;
     }
@@ -363,9 +386,14 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
         break;
     }
 
-    // Alt releases need defusing whether or not alt itself is remapped.
-    if (!down && (id == kScLAlt || id == kScRAlt))
-        MaskAltUpIfNeeded();
+    // Alt releases need defusing — keyed on what the key is actually holding
+    // down, not on its own identity, since the Alt may be coming from a remap
+    // of some entirely different key.
+    if (!down) {
+        const KeyId eff = EffectiveDown(id);
+        if (eff == kScLAlt || eff == kScRAlt)
+            MaskAltUpIfNeeded();
+    }
 
     // ------------------------------------------------------------- chords
 
