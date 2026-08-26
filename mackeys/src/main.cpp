@@ -291,12 +291,16 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
 
     const bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
 
-    // The settings picker takes raw keystrokes ahead of everything, including
-    // the pause state, and swallows them so nothing else reacts.
+    // Both settings captures take raw keystrokes ahead of everything, including
+    // the pause state, and swallow them so nothing else reacts. Injected input
+    // was dropped above, so every key reaching here is a physical one.
     {
         const KeyId raw = MakeKeyId(k->scanCode, (k->flags & LLKHF_EXTENDED) != 0);
         if (CaptureActive() && ForwardCaptureKey(raw, down))
-            return 1;
+            return 1; // the keyboard picker, capturing one key
+        if (keychord::ChordCaptureActive() &&
+            keychord::FeedChordKey(raw, down, KeyOrigin::Physical))
+            return 1; // the Hotkeys list, capturing a whole chord
     }
 
     if (g_paused)
