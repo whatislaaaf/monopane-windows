@@ -133,21 +133,15 @@ bool LegacyBool(HKEY key, const wchar_t* name, bool fallback)
     return fallback;
 }
 
-// Earlier builds had two booleans instead of a chord list. Ctrl+Space becomes
-// an explicit *left* Ctrl chord — the old check merged both Ctrls, and left is
-// the one worth keeping. The language switcher hung off whichever key held the
-// Ctrl (Mac cmd) role, so it can only be rebuilt when such a key exists.
-void SynthesizeLegacyChords(Config& cfg, bool ctrlSpaceStart, bool cmdSpaceLang)
+// Earlier builds had two booleans instead of a chord list. The language
+// switcher hung off whichever key held the Ctrl (Mac cmd) role, so it can only
+// be rebuilt when such a key exists. The other boolean, Ctrl+Space for the
+// Start menu, is not carried over: Left Ctrl+Space is Monopane's launchpad
+// now, and the Start-menu action stays available from Add… for anyone who
+// wants it on some other chord.
+void SynthesizeLegacyChords(Config& cfg, bool cmdSpaceLang)
 {
     cfg.chords.clear();
-    if (ctrlSpaceStart) {
-        ChordBinding b;
-        b.action = ChordAction::StartMenu;
-        b.from.mods[0] = 0x1D;
-        b.from.modCount = 1;
-        b.from.trigger = 0x39;
-        cfg.chords.push_back(b);
-    }
     if (!cmdSpaceLang)
         return;
     for (int slot = 0; slot < kKeySlots; ++slot) {
@@ -175,8 +169,7 @@ void MigrateLegacySettings(Config& cfg)
         return;
     if (!LegacyBool(key, L"CapsAsBackspace", true))
         cfg.base[KeySlot(0x3A)] = Bind();
-    SynthesizeLegacyChords(cfg, LegacyBool(key, L"CtrlSpaceStart", true),
-                           LegacyBool(key, L"CmdSpaceLang", true));
+    SynthesizeLegacyChords(cfg, LegacyBool(key, L"CmdSpaceLang", true));
     RegCloseKey(key);
 }
 
@@ -212,14 +205,9 @@ void ResetToDefaults(Config& cfg)
     SetNav(cfg, 0x16, Action::DesktopPrev);  // U
     SetNav(cfg, 0x18, Action::DesktopNext);  // O
 
-    // Left Ctrl specifically, not either Ctrl — chords match the physical key.
+    // No chords out of the box. Left Ctrl+Space, which used to open the Start
+    // menu here, is left for Monopane's launchpad.
     cfg.chords.clear();
-    ChordBinding start;
-    start.action = ChordAction::StartMenu;
-    start.from.mods[0] = 0x1D;
-    start.from.modCount = 1;
-    start.from.trigger = 0x39;
-    cfg.chords.push_back(start);
 
     cfg.layout = BoardLayout::Auto;
 }
@@ -262,11 +250,11 @@ void LoadConfig()
     enum class Section { None, Options, Base, Nav, Chords };
     Section section = Section::None;
 
-    // A file predating [chords] still carries the two booleans; they are
-    // turned into chords once the whole file is read, when the base table is
-    // known and the Ctrl-role key can be found.
+    // A file predating [chords] still carries the two booleans; the language
+    // one is turned into a chord once the whole file is read, when the base
+    // table is known and the Ctrl-role key can be found. The Start-menu one
+    // is read and dropped.
     bool sawChordsSection = false;
-    bool legacyCtrlSpace = true;
     bool legacyCmdSpace = true;
 
     size_t pos = 0;
@@ -337,7 +325,7 @@ void LoadConfig()
         if (section == Section::Options) {
             const bool on = value != "0" && value != "false";
             if (name == "ctrl_space_start")
-                legacyCtrlSpace = on;
+                continue;
             else if (name == "cmd_space_lang")
                 legacyCmdSpace = on;
             else if (name == "layout")
@@ -361,7 +349,7 @@ void LoadConfig()
     }
 
     if (!sawChordsSection)
-        SynthesizeLegacyChords(g_config, legacyCtrlSpace, legacyCmdSpace);
+        SynthesizeLegacyChords(g_config, legacyCmdSpace);
 }
 
 bool SaveConfig()

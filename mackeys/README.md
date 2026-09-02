@@ -25,12 +25,17 @@ Nav layer (hold the layer key):
 | `u` | Ctrl+Win+Left — previous virtual desktop |
 | `o` | Ctrl+Win+Right — next virtual desktop |
 
-Plus one hotkey, which spans several keys and so lives in the Hotkeys list on
-the Options tab rather than on the keyboard picture:
+Chords that span several keys live in the Hotkeys list on the Options tab
+rather than on the keyboard picture. None are bound out of the box: **Left
+Ctrl + Space**, the Spotlight position, is left free for
+[Monopane](https://github.com/whatislaaaf/monopane-windows)'s launchpad. The
+actions on offer there:
 
-| Combo | Does |
+| Action | Does |
 | --- | --- |
-| **Left** Ctrl + Space | Taps the Win key to open the Start menu, like Spotlight (costs the raw Ctrl+Space chord used by IDE autocomplete) |
+| Open the Start menu | Taps the Win key (costs whatever chord you put it on, e.g. the raw Ctrl+Space used by IDE autocomplete) |
+| Switch input language | Sends Win+Space |
+| Send another chord | Rewrites one chord as another |
 
 Arrow targets in the nav layer understand Mac-style modifiers, translated to
 the Windows equivalents (held Alt/Ctrl are masked as needed so apps see only
@@ -119,9 +124,9 @@ E038 = layer              # Right Alt -> nav layer
 16 = desktop:prev         # U -> prev desktop
 
 [chords]
-start_menu     = 1D+39           # Left Ctrl + Space
 input_language = 38+39           # Left Alt + Space
 send           = 38+10 > E038+3E # Left Alt + Q sends Right Alt + F4
+start_menu     = E01D+39         # Right Ctrl + Space
 ```
 
 Keys are set-1 scancodes in hex, with `E0` prefixing extended keys. Actions are
@@ -200,10 +205,11 @@ E05B = key:38             # Win -> Left Alt (the "option" for word jump)
 38   = ctrl               # Alt -> Ctrl (Mac cmd), touching space
 ```
 
-A file predating `[chords]` is upgraded on load: `ctrl_space_start` becomes an
-explicit **left** Ctrl + Space chord (the old check merged both Ctrls), and
-`cmd_space_lang` follows whichever key holds the Ctrl role. If no key holds
-that role yet, the language chord is dropped — add it in the Hotkeys list.
+A file predating `[chords]` is upgraded on load: `cmd_space_lang` becomes a
+chord on whichever key holds the Ctrl role (if no key holds that role yet, it
+is dropped — add it in the Hotkeys list), and `ctrl_space_start` is dropped,
+since Left Ctrl + Space now belongs to Monopane's launchpad. Add a `start_menu`
+chord by hand if you still want one.
 
 If the old hand-written Scancode Map is still installed, MacKeys will notice it
 no longer matches and offer to remove it.
@@ -226,7 +232,7 @@ repo's history at commit `a55a114`.)
 | Right Alt | nav layer | nav layer |
 | Menu | Windows key | left alone — macOS has no counterpart |
 | Right Ctrl | Right Ctrl | Right Control |
-| leftmost + Space | Start menu | **Spotlight** |
+| leftmost + Space | Monopane's launchpad | **Spotlight** |
 | command key + Space | switch input language | **switch input source** |
 
 Nav layer `u` / `o` switch virtual desktops on Windows and Spaces on macOS
