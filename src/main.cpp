@@ -1,4 +1,5 @@
-// Monopane — a searchable Cmd+Tab window switcher for Windows.
+// Monopane — a searchable Cmd+Tab window switcher for Windows, with a
+// launchpad of pinned apps on a second hotkey (see launchpad.h).
 //
 // Press left Cmd+Tab (on a Mac keyboard remapped by MacKeys) to open the
 // overlay, type a few letters to fuzzy-filter the open windows, press Enter
@@ -25,7 +26,10 @@
 #include "aliases.h"
 #include "display.h"
 #include "fuzzy.h"
+#include "launchpad.h"
+#include "paint.h"
 #include "settings.h"
+#include "theme.h"
 #include "window_list.h"
 #include "../res/resource.h"
 
@@ -40,10 +44,12 @@ constexpr ULONG_PTR kMacKeysMarker = 0x4D4B5953;
 constexpr UINT WM_APP_HOTKEY = WM_APP + 1;  // wParam: 1 = shift held (cycle up)
 constexpr UINT WM_APP_TRAY = WM_APP + 2;
 constexpr UINT WM_APP_ROTATE = WM_APP + 3;
+constexpr UINT WM_APP_LAUNCHPAD = WM_APP + 4;
 
 constexpr UINT IDC_SEARCH_EDIT = 100;
 constexpr UINT IDM_EXIT = 201;
 constexpr UINT IDM_SETTINGS = 202;
+constexpr UINT IDM_LAUNCHPAD = 203;
 constexpr UINT TRAY_ICON_ID = 1;
 
 constexpr int MAX_VISIBLE_ROWS = 10;
@@ -55,11 +61,10 @@ constexpr int BASE_ROW_H = 44;
 constexpr int BASE_PAD = 10;
 constexpr int BASE_ICON = 24;
 
-constexpr COLORREF CLR_BG = RGB(30, 30, 30);
-constexpr COLORREF CLR_SEARCH_BG = RGB(45, 45, 45);
-constexpr COLORREF CLR_SELECTION = RGB(0, 95, 184);
-constexpr COLORREF CLR_TEXT = RGB(242, 242, 242);
-constexpr COLORREF CLR_TEXT_DIM = RGB(170, 170, 170);
+// What Windows 11 rounds a window's own corners by, so the search box can be
+// rounded to match the frame around it.
+constexpr int BASE_CORNER = 8;
+
 
 HINSTANCE g_hInstance = nullptr;
 HWND g_hwndOverlay = nullptr;
@@ -79,6 +84,7 @@ HFONT g_fontApp = nullptr;
 HFONT g_fontTitle = nullptr;
 HFONT g_fontEdit = nullptr;
 HBRUSH g_brushSearchBg = nullptr;
+int g_editLineH = 0;   // one line of g_fontEdit, for centring the search box
 NOTIFYICONDATAW g_trayIcon{};
 
 // Explorer broadcasts this when the taskbar appears — at logon, and again if
@@ -110,8 +116,28 @@ void CreateFonts()
     lf.lfHeight = -Scale(17);
     g_fontEdit = CreateFontIndirectW(&lf);
 
+    // A single-line edit control draws its text at the top of its client area,
+    // not down the middle of it, so the only way to have the text sit centred
+    // in the search plate is to make the control exactly one line tall and
+    // centre that. Which means knowing how tall a line is.
+    if (HDC dc = GetDC(g_hwndOverlay)) {
+        HGDIOBJ old = SelectObject(dc, g_fontEdit);
+        TEXTMETRICW tm{};
+        GetTextMetricsW(dc, &tm);
+        g_editLineH = tm.tmHeight;
+        SelectObject(dc, old);
+        ReleaseDC(g_hwndOverlay, dc);
+    }
+
     if (g_hwndEdit)
         SendMessageW(g_hwndEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g_fontEdit), TRUE);
+}
+
+// The plate the search box sits on.
+RECT SearchPlateRect()
+{
+    const int pad = Scale(BASE_PAD);
+    return RECT{ pad, pad, Scale(BASE_WIDTH) - pad, Scale(BASE_SEARCH_H) - Scale(4) };
 }
 
 // ---------------------------------------------------------------------------
@@ -205,34 +231,14 @@ void LayoutOverlay(bool reposition)
     }
 
     SetWindowPos(g_hwndOverlay, HWND_TOPMOST, x, y, width, height, flags);
-    MoveWindow(g_hwndEdit, pad * 2, pad + Scale(6), width - pad * 4, searchH - pad * 2 - Scale(6), TRUE);
+
+    // One line tall, centred in the plate: see CreateFonts.
+    const RECT plate = SearchPlateRect();
+    const int editH = g_editLineH + Scale(2);
+    MoveWindow(g_hwndEdit, plate.left + Scale(10),
+               plate.top + ((plate.bottom - plate.top) - editH) / 2,
+               (plate.right - Scale(10)) - (plate.left + Scale(10)), editH, TRUE);
     InvalidateRect(g_hwndOverlay, nullptr, TRUE);
-}
-
-void ForceForeground(HWND hwnd)
-{
-    if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd)
-        return;
-
-    const DWORD fgThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
-    const DWORD myThread = GetCurrentThreadId();
-    if (fgThread != myThread && AttachThreadInput(myThread, fgThread, TRUE)) {
-        SetForegroundWindow(hwnd);
-        AttachThreadInput(myThread, fgThread, FALSE);
-    }
-
-    if (GetForegroundWindow() != hwnd) {
-        // Last resort: a synthesized key event satisfies the foreground-lock
-        // heuristic ("the process received the last input event").
-        INPUT input[2]{};
-        input[0].type = INPUT_KEYBOARD;
-        input[0].ki.wVk = VK_MENU;
-        input[1].type = INPUT_KEYBOARD;
-        input[1].ki.wVk = VK_MENU;
-        input[1].ki.dwFlags = KEYEVENTF_KEYUP;
-        SendInput(2, input, sizeof(INPUT));
-        SetForegroundWindow(hwnd);
-    }
 }
 
 void HideOverlay()
@@ -325,9 +331,9 @@ void PaintOverlay(HDC hdc, const RECT& client)
     FillRect(mem, &full, bgBrush);
     DeleteObject(bgBrush);
 
-    // Search box background (the edit control paints itself on top)
-    RECT searchRect{ pad, pad, width - pad, searchH - Scale(4) };
-    FillRect(mem, &searchRect, g_brushSearchBg);
+    // Search box background (the edit control paints itself on top), rounded
+    // to the same radius the compositor rounds the window itself by.
+    FillRoundRectAA(mem, SearchPlateRect(), Scale(BASE_CORNER), CLR_SEARCH_BG, CLR_BG);
 
     SetBkMode(mem, TRANSPARENT);
 
@@ -345,15 +351,8 @@ void PaintOverlay(HDC hdc, const RECT& client)
         const int y = searchH + (i - g_scrollTop) * rowH;
 
         if (i == g_selected) {
-            HBRUSH selBrush = CreateSolidBrush(CLR_SELECTION);
-            HPEN selPen = CreatePen(PS_SOLID, 1, CLR_SELECTION);
-            HGDIOBJ oldBrush = SelectObject(mem, selBrush);
-            HGDIOBJ oldPen = SelectObject(mem, selPen);
-            RoundRect(mem, pad, y + Scale(2), width - pad, y + rowH - Scale(2), Scale(8), Scale(8));
-            SelectObject(mem, oldBrush);
-            SelectObject(mem, oldPen);
-            DeleteObject(selBrush);
-            DeleteObject(selPen);
+            const RECT sel{ pad, y + Scale(2), width - pad, y + rowH - Scale(2) };
+            FillRoundRectAA(mem, sel, Scale(6), CLR_SELECTION, CLR_BG);
         }
 
         int x = pad * 2;
@@ -543,6 +542,20 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                     return 1;
                 }
             }
+
+            // Loose like the others: under MacKeys the physical key behind
+            // the chord's modifier may still be seen down alongside the one
+            // MacKeys injects for it, and an exact match would refuse that.
+            const keychord::KeyChord& launchpad = g_settings.launchpadHotkey;
+            if (down && keychord::ChordValid(launchpad) && id == launchpad.trigger &&
+                (launchpad.triggerOrigin == keychord::KeyOrigin::Any ||
+                 launchpad.triggerOrigin == origin)) {
+                PruneStaleHeld();
+                if (keychord::ChordMatches(launchpad, g_held, g_heldCount, /*exact=*/false)) {
+                    PostMessageW(g_hwndOverlay, WM_APP_LAUNCHPAD, 0, 0);
+                    return 1;
+                }
+            }
         }
     }
     return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
@@ -582,6 +595,7 @@ void AddTrayIcon(HWND hwnd)
 void ShowTrayMenu(HWND hwnd)
 {
     HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, IDM_LAUNCHPAD, L"Launchpad");
     AppendMenuW(menu, MF_STRING, IDM_SETTINGS, L"Settings…");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_EXIT, L"Exit");
@@ -629,16 +643,27 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_APP_HOTKEY:
+        if (LaunchpadVisible())
+            HideLaunchpad();
         if (!g_overlayVisible)
             ShowOverlay();
         else
             MoveSelection(wParam ? -1 : 1);
         return 0;
 
+    case WM_APP_LAUNCHPAD:
+        HideOverlay();
+        if (LaunchpadVisible())
+            HideLaunchpad();
+        else
+            ShowLaunchpad();
+        return 0;
+
     case WM_APP_ROTATE:
         // The switcher is sized to the monitor it opens on, so a rotation
         // underneath it would leave it stale; it reopens re-laid-out.
         HideOverlay();
+        HideLaunchpad();
         CycleOrientation();
         return 0;
 
@@ -657,8 +682,14 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             return 0;
         }
+        if (LOWORD(wParam) == IDM_LAUNCHPAD) {
+            HideOverlay();
+            ShowLaunchpad();
+            return 0;
+        }
         if (LOWORD(wParam) == IDM_SETTINGS) {
             HideOverlay();
+            HideLaunchpad();
             ShowSettingsDialog(hwnd, g_hInstance);
             return 0;
         }
@@ -763,7 +794,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     LoadSettings();
     LoadAliases();
 
-    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES };
+    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES };
     InitCommonControlsEx(&icc);
 
     WNDCLASSEXW wc{ sizeof(wc) };
@@ -786,6 +817,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     DWORD cornerPref = 2;  // DWMWCP_ROUND
     DwmSetWindowAttribute(hwnd, 33 /*DWMWA_WINDOW_CORNER_PREFERENCE*/,
                           &cornerPref, sizeof(cornerPref));
+
+    if (!CreateLaunchpadWindow(hInstance)) {
+        DestroyWindow(hwnd);
+        return 1;
+    }
 
     g_taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
 
@@ -820,6 +856,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 
     UnhookWindowsHookEx(g_keyboardHook);
     ClearIconCache();
+    DestroyLaunchpadResources();
     if (g_fontApp) DeleteObject(g_fontApp);
     if (g_fontTitle) DeleteObject(g_fontTitle);
     if (g_fontEdit) DeleteObject(g_fontEdit);

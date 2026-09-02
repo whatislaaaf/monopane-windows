@@ -11,6 +11,9 @@ add_executable(monopane WIN32
     src/settings.cpp
     src/aliases.cpp
     src/display.cpp
+    src/launchpad.cpp
+    src/launchpad_apps.cpp
+    src/paint.cpp
     external/keychord/keychord_name.cpp
     external/keychord/keychord_chord.cpp
     external/keychord/keychord_capture.cpp
@@ -24,5 +27,5 @@ if(MSVC)
 endif()
 
 target_link_libraries(monopane PRIVATE
-    user32 gdi32 shell32 comctl32 dwmapi advapi32 ole32 version
+    user32 gdi32 shell32 comctl32 dwmapi advapi32 ole32 version msimg32 comdlg32
 )

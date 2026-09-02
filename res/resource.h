@@ -13,3 +13,10 @@
 #define IDC_TXT_HOTKEY_HINT     308
 #define IDC_TXT_ROTATE          309
 #define IDC_BTN_ROTATE          310
+#define IDC_TXT_LAUNCHPAD       311
+#define IDC_BTN_LAUNCHPAD       312
+#define IDC_BTN_LAUNCHPAD_FOLDER 313
+
+#define IDD_PICKER              320
+#define IDC_PICK_SEARCH         321
+#define IDC_PICK_LIST           322

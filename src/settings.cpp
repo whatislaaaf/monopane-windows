@@ -3,6 +3,7 @@
 #include <string>
 
 #include "aliases.h"
+#include "launchpad.h"
 #include "../res/resource.h"
 
 Settings g_settings;
@@ -64,9 +65,10 @@ bool g_autoStartAtOpen = false;
 // The dialog edits these copies; g_settings only changes on OK.
 keychord::KeyChord g_editHotkey;
 keychord::KeyChord g_editRotate;
+keychord::KeyChord g_editLaunchpad;
 
-// Which of the two chords the running capture is for, if any.
-enum class Capturing { None, Hotkey, Rotate };
+// Which of the chords the running capture is for, if any.
+enum class Capturing { None, Hotkey, Rotate, Launchpad };
 Capturing g_capturing = Capturing::None;
 
 void ShowHotkeys(HWND dlg)
@@ -80,8 +82,13 @@ void ShowHotkeys(HWND dlg)
                     g_capturing == Capturing::Rotate
                         ? L"Press it now…"
                         : keychord::DescribeChord(g_editRotate).c_str());
+    SetDlgItemTextW(dlg, IDC_TXT_LAUNCHPAD,
+                    g_capturing == Capturing::Launchpad
+                        ? L"Press it now…"
+                        : keychord::DescribeChord(g_editLaunchpad).c_str());
     EnableWindow(GetDlgItem(dlg, IDC_BTN_HOTKEY), !busy);
     EnableWindow(GetDlgItem(dlg, IDC_BTN_ROTATE), !busy);
+    EnableWindow(GetDlgItem(dlg, IDC_BTN_LAUNCHPAD), !busy);
     SetDlgItemTextW(dlg, IDC_TXT_HOTKEY_HINT,
                     busy
                         ? L"Hold the modifiers and press the trigger key, then let go."
@@ -105,12 +112,15 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
         g_capturing = Capturing::None;
         g_editHotkey = g_settings.hotkey;
         g_editRotate = g_settings.rotateHotkey;
+        g_editLaunchpad = g_settings.launchpadHotkey;
         ShowHotkeys(dlg);
         return TRUE;
 
     case keychord::WM_CHORD_CAPTURED:
         if (g_capturing == Capturing::Rotate)
             g_editRotate = keychord::CapturedChord();
+        else if (g_capturing == Capturing::Launchpad)
+            g_editLaunchpad = keychord::CapturedChord();
         else
             g_editHotkey = keychord::CapturedChord();
         g_capturing = Capturing::None;
@@ -153,6 +163,16 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
             ShowHotkeys(dlg);
             return TRUE;
 
+        case IDC_BTN_LAUNCHPAD:
+            if (keychord::BeginChordCapture(dlg))
+                g_capturing = Capturing::Launchpad;
+            ShowHotkeys(dlg);
+            return TRUE;
+
+        case IDC_BTN_LAUNCHPAD_FOLDER:
+            OpenLaunchpadConfigFolder();
+            return TRUE;
+
         case IDOK: {
             keychord::CancelChordCapture();
             g_settings.activateAllOfApp = IsDlgButtonChecked(dlg, IDC_CHK_ACTIVATE_ALL) == BST_CHECKED;
@@ -162,6 +182,8 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
                 g_settings.hotkey = g_editHotkey;
             if (keychord::ChordValid(g_editRotate))
                 g_settings.rotateHotkey = g_editRotate;
+            if (keychord::ChordValid(g_editLaunchpad))
+                g_settings.launchpadHotkey = g_editLaunchpad;
             SaveSettings();
             const bool autoStart = IsDlgButtonChecked(dlg, IDC_CHK_AUTOSTART) == BST_CHECKED;
             if (autoStart != g_autoStartAtOpen)
@@ -211,10 +233,19 @@ void DefaultRotateHotkey(keychord::KeyChord& out)
     out.trigger = 0x13;  // R
 }
 
+void DefaultLaunchpadHotkey(keychord::KeyChord& out)
+{
+    out = keychord::KeyChord();
+    out.mods[0] = 0x1D;  // left ctrl
+    out.modCount = 1;
+    out.trigger = 0x39;  // space
+}
+
 void LoadSettings()
 {
     DefaultHotkey(g_settings.hotkey);
     DefaultRotateHotkey(g_settings.rotateHotkey);
+    DefaultLaunchpadHotkey(g_settings.launchpadHotkey);
 
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
@@ -234,6 +265,10 @@ void LoadSettings()
     if (!storedRotate.empty() && keychord::ParseChord(storedRotate, parsed))
         g_settings.rotateHotkey = parsed;
 
+    const std::string storedLaunchpad = ReadAscii(key, L"LaunchpadHotkey");
+    if (!storedLaunchpad.empty() && keychord::ParseChord(storedLaunchpad, parsed))
+        g_settings.launchpadHotkey = parsed;
+
     RegCloseKey(key);
 }
 
@@ -248,6 +283,7 @@ void SaveSettings()
     WriteBool(key, L"MatchAppName", g_settings.matchAppName);
     WriteAscii(key, L"Hotkey", keychord::FormatChord(g_settings.hotkey));
     WriteAscii(key, L"RotateHotkey", keychord::FormatChord(g_settings.rotateHotkey));
+    WriteAscii(key, L"LaunchpadHotkey", keychord::FormatChord(g_settings.launchpadHotkey));
     RegCloseKey(key);
 }
 

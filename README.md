@@ -6,6 +6,10 @@ feature of the [Context](https://contexts.co) app on macOS.
 Press your hotkey (**Cmd+Tab** by default, see below), type the first few letters of a window's name,
 press **Enter** — that window becomes active.
 
+It also has a **launchpad**: **Ctrl+Space** opens a grid of the apps you have
+pinned, with a pencil to rearrange them — a Start menu whose pinned area is as
+big as you want it.
+
 ## Features
 
 - **A hotkey you capture by pressing it** opens a searchable overlay (via a
@@ -20,6 +24,10 @@ press **Enter** — that window becomes active.
 - **Learned aliases** — activating a window with a search typed remembers that
   query → app pairing (e.g. `cla` → Claude), ranking it first from then on;
   forgettable via *Clear search memory* in Settings
+- **A launchpad** — a third hotkey (`Ctrl+Space` by default) opens a grid of
+  pinned apps, seeded from your Start menu pins; click one (or type and press
+  Enter) to bring it forward if it is running, or start it if not. A pencil
+  switches to edit mode for reordering, renaming, removing and adding
 - **Rotate the display** — a second hotkey (`Ctrl+Alt+R` by default) cycles the
   monitor under the cursor through landscape → portrait → portrait (flipped),
   for swapping between a tall screen for work and a wide one for games
@@ -28,7 +36,7 @@ press **Enter** — that window becomes active.
 
 ## The hotkeys
 
-There are two, both captured the same way: **Settings → Hotkeys → Set…**, then
+There are three, all captured the same way: **Settings → Hotkeys → Set…**, then
 hold the modifiers and press the trigger key and let go. The trigger is
 whichever key you pressed last. Esc cancels, and the capture releases itself
 after 15 seconds, so it can never leave the keyboard swallowed.
@@ -76,6 +84,43 @@ reboot, exactly as the Settings app's own dropdown does.
 `AltGr+R` is safe: AltGr arrives as *right* Alt, and the chord is bound to the
 left one by scancode.
 
+### Opening the launchpad
+
+**Left Ctrl+Space** by default, taken however the keys arrive, and tolerant of
+extra modifiers like the other two. Under MacKeys, capture it by pressing the
+key you think of as Ctrl: if that key is remapped, the chord records whatever
+MacKeys turns it into, and works all the same.
+
+MacKeys used to put the Start menu on this chord; from its current version it
+no longer does, and it is the launchpad's.
+
+## The launchpad
+
+A panel centred on the monitor with the cursor: a search box, a pencil, and a
+six-wide grid of icons. Type to filter it, arrows move the highlight, **Enter**
+or a click opens the app, **Esc** closes. Opening an app that already has a
+window brings that window forward; **Shift+Enter** or Shift+click starts a
+fresh instance regardless. Search memory works here too.
+
+The **pencil** (top right) switches to edit mode:
+
+- **Drag** a tile to move it; the others shuffle out of the way
+- The **✕** on a tile removes it (or select it and press **Delete**)
+- Click a tile's **name** to rename it (or **F2**); Enter commits, Esc reverts,
+  and typing the app's own name back clears the custom one
+- The **+** tile adds an app: *Installed app…* lists everything the Start menu
+  knows about, Store apps included, with a search box; *Browse for a file…*
+  takes any `.exe` or `.lnk`
+
+The pencil again, or Esc, leaves edit mode.
+
+The first time it opens, the grid is seeded with whatever is pinned to your
+Start menu, in the same order. After that it is entirely yours: the list lives
+in `%APPDATA%\Monopane\launchpad.ini` (**Settings → Open config folder**), one
+app per line in grid order, either a path or `app:<AppUserModelID>`, with an
+optional `| name` after it. Edit it by hand if you like; the launchpad rereads
+it the next time it opens.
+
 ## Usage
 
 | Key | Action |
@@ -87,9 +132,15 @@ left one by scancode.
 | `Enter` | Activate the selected window |
 | `Esc` | Dismiss without switching |
 | `Ctrl+Alt+R` (default) | Rotate the monitor under the cursor one step |
+| `Ctrl+Space` (default) | Open the launchpad (again to close it) |
+| in the launchpad: `←` `→` `↑` `↓` | Move the highlight |
+| in the launchpad: `Enter` / click | Open the app, or bring its window forward |
+| in the launchpad: `Shift+Enter` / Shift+click | Start a fresh instance |
+| in edit mode: `Delete` / `F2` | Remove / rename the highlighted tile |
 
 Monopane lives in the system tray. Right-click the tray icon for
-**Start with Windows** and **Exit**.
+**Launchpad**, **Settings…** (hotkeys, options, *Start with Windows*) and
+**Exit**.
 
 ## Building
 

@@ -1,6 +1,8 @@
 #include "window_list.h"
 
+#include <initguid.h>  // ahead of propkey.h, so PKEY_AppUserModel_ID is defined here
 #include <dwmapi.h>
+#include <propkey.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <unordered_map>
@@ -81,11 +83,28 @@ const AppInfo& GetAppInfo(const std::wstring& exePath)
             info.icon = sfi.hIcon;
     }
 
-    info.name = FileDescription(exePath);
-    if (info.name.empty())
-        info.name = ExeStem(exePath);
+    info.name = ExeDisplayName(exePath);
 
     return g_appCache.emplace(exePath, std::move(info)).first->second;
+}
+
+// The AppUserModelID a window carries, which is how the taskbar groups it.
+// Windows of Store apps are hosted by ApplicationFrameHost, so this is the
+// only thing that says which app one belongs to.
+std::wstring WindowAumid(HWND hwnd)
+{
+    std::wstring out;
+    IPropertyStore* store = nullptr;
+    if (FAILED(SHGetPropertyStoreForWindow(hwnd, IID_PPV_ARGS(&store))))
+        return out;
+    PROPVARIANT value;
+    PropVariantInit(&value);
+    if (SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &value)) && value.vt == VT_LPWSTR &&
+        value.pwszVal)
+        out = value.pwszVal;
+    PropVariantClear(&value);
+    store->Release();
+    return out;
 }
 
 bool IsCloaked(HWND hwnd)
@@ -163,6 +182,7 @@ BOOL CALLBACK EnumProc(HWND hwnd, LPARAM lParam)
     WindowInfo info;
     info.hwnd = hwnd;
     info.title = title;
+    info.aumid = WindowAumid(hwnd);
     if (!exePath.empty()) {
         const AppInfo& app = GetAppInfo(exePath);
         info.appName = app.name;
@@ -175,6 +195,12 @@ BOOL CALLBACK EnumProc(HWND hwnd, LPARAM lParam)
 }
 
 } // namespace
+
+std::wstring ExeDisplayName(const std::wstring& exePath)
+{
+    std::wstring name = FileDescription(exePath);
+    return name.empty() ? ExeStem(exePath) : name;
+}
 
 void SetIconSizePx(int px)
 {
@@ -211,6 +237,32 @@ void ActivateWindow(HWND hwnd)
         SetForegroundWindow(hwnd);
         AttachThreadInput(myThread, fgThread, FALSE);
     } else {
+        SetForegroundWindow(hwnd);
+    }
+}
+
+void ForceForeground(HWND hwnd)
+{
+    if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd)
+        return;
+
+    const DWORD fgThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+    const DWORD myThread = GetCurrentThreadId();
+    if (fgThread != myThread && AttachThreadInput(myThread, fgThread, TRUE)) {
+        SetForegroundWindow(hwnd);
+        AttachThreadInput(myThread, fgThread, FALSE);
+    }
+
+    if (GetForegroundWindow() != hwnd) {
+        // Last resort: a synthesized key event satisfies the foreground-lock
+        // heuristic ("the process received the last input event").
+        INPUT input[2]{};
+        input[0].type = INPUT_KEYBOARD;
+        input[0].ki.wVk = VK_MENU;
+        input[1].type = INPUT_KEYBOARD;
+        input[1].ki.wVk = VK_MENU;
+        input[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(2, input, sizeof(INPUT));
         SetForegroundWindow(hwnd);
     }
 }
