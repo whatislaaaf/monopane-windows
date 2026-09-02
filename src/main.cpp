@@ -81,6 +81,10 @@ HFONT g_fontEdit = nullptr;
 HBRUSH g_brushSearchBg = nullptr;
 NOTIFYICONDATAW g_trayIcon{};
 
+// Explorer broadcasts this when the taskbar appears — at logon, and again if
+// it is ever restarted. Either way the tray icon has to be added afresh.
+UINT g_taskbarCreatedMsg = 0;
+
 int Scale(int value)
 {
     return MulDiv(value, g_dpi, 96);
@@ -547,6 +551,20 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
 // ---------------------------------------------------------------------------
 // Tray icon
 
+// A logon task fires within seconds, which is often *before* Explorer is up,
+// and an app that does its setup then comes up half-working: Shell_NotifyIcon
+// has no taskbar to add an icon to, and the keyboard hook is installed against
+// a desktop that is not yet the one receiving input — so the tray icon is
+// missing and the hotkey does nothing. Waiting for the shell window to exist
+// costs nothing on a normal launch (it is already there) and puts the logon
+// case on the same footing.
+void WaitForShell(DWORD timeoutMs)
+{
+    const DWORD deadline = GetTickCount() + timeoutMs;
+    while (GetShellWindow() == nullptr && GetTickCount() < deadline)
+        Sleep(250);
+}
+
 void AddTrayIcon(HWND hwnd)
 {
     g_trayIcon.cbSize = sizeof(g_trayIcon);
@@ -581,6 +599,14 @@ void ShowTrayMenu(HWND hwnd)
 
 LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    // Registered messages have no compile-time value, so this cannot be a case
+    // label. NIM_ADD is idempotent enough: a duplicate add is refused, and the
+    // icon we already have stays put.
+    if (msg != 0 && msg == g_taskbarCreatedMsg) {
+        AddTrayIcon(hwnd);
+        return 0;
+    }
+
     switch (msg) {
     case WM_CREATE: {
         g_hwndOverlay = hwnd;
@@ -761,6 +787,23 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     DwmSetWindowAttribute(hwnd, 33 /*DWMWA_WINDOW_CORNER_PREFERENCE*/,
                           &cornerPref, sizeof(cornerPref));
 
+    g_taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
+
+    // Started by the logon task, this is where the first seconds after sign-in
+    // are spent; on a hand-launched run it returns at once.
+    WaitForShell(60000);
+
+    AddTrayIcon(hwnd);
+
+    // The hook goes in last, with nothing between it and the pump below.
+    //
+    // A low-level hook is dispatched on this thread's message queue, so a hook
+    // installed while the thread is still busy elsewhere has to wait for the
+    // work to finish before it can answer. Windows only waits so long
+    // (LowLevelHooksTimeout) and then quietly drops the hook — the process
+    // stays up, the tray icon stays put, and no key is ever seen again. At
+    // logon, where Shell_NotifyIcon above can block on a taskbar that is itself
+    // still starting, that gap was wide enough to lose the hook now and then.
     g_keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, hInstance, 0);
     if (!g_keyboardHook) {
         MessageBoxW(nullptr, L"Failed to install the keyboard hook.",
@@ -768,8 +811,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
         DestroyWindow(hwnd);
         return 1;
     }
-
-    AddTrayIcon(hwnd);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
