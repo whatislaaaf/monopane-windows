@@ -11,3 +11,5 @@
 #define IDC_TXT_HOTKEY          306
 #define IDC_BTN_HOTKEY          307
 #define IDC_TXT_HOTKEY_HINT     308
+#define IDC_TXT_ROTATE          309
+#define IDC_BTN_ROTATE          310

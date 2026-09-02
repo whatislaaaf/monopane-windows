@@ -13,6 +13,8 @@ struct Settings {
     bool matchAppName = true;
     // The chord that opens the switcher, captured by pressing it in Settings.
     keychord::KeyChord hotkey;
+    // The chord that rotates the monitor under the cursor, likewise captured.
+    keychord::KeyChord rotateHotkey;
 };
 
 extern Settings g_settings;
@@ -21,6 +23,10 @@ extern Settings g_settings;
 // injected origin is what leaves a genuine physical Ctrl+Tab alone, so in-app
 // tab switching keeps working.
 void DefaultHotkey(keychord::KeyChord& out);
+
+// The out-of-the-box rotate hotkey: Ctrl+Alt+R, taken however the keys arrive,
+// so it works under MacKeys (where it reads as Cmd+Alt+R) and without it alike.
+void DefaultRotateHotkey(keychord::KeyChord& out);
 
 // Persisted under HKCU\Software\Monopane.
 void LoadSettings();

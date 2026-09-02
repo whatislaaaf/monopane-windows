@@ -31,6 +31,7 @@ if errorlevel 1 exit /b 1
 
 cl /nologo /std:c++17 /O2 /W4 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX ^
    src\main.cpp src\window_list.cpp src\fuzzy.cpp src\settings.cpp src\aliases.cpp ^
+   src\display.cpp ^
    external\keychord\keychord_name.cpp external\keychord\keychord_chord.cpp ^
    external\keychord\keychord_capture.cpp ^
    build\monopane.res ^

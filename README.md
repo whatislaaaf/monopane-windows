@@ -9,7 +9,8 @@ press **Enter** — that window becomes active.
 ## Features
 
 - **A hotkey you capture by pressing it** opens a searchable overlay (via a
-  low-level keyboard hook; native Alt+Tab is left untouched)
+  low-level keyboard hook; native Alt+Tab is left untouched), centred on the
+  monitor the cursor is on
 - **Fuzzy search** over app name and window title — `chr` matches *Google Chrome*,
   `vsc` matches *Visual Studio Code*
 - **Keyboard navigation** — Up/Down arrows, Tab / Shift+Tab, PageUp/PageDown,
@@ -19,15 +20,20 @@ press **Enter** — that window becomes active.
 - **Learned aliases** — activating a window with a search typed remembers that
   query → app pairing (e.g. `cla` → Claude), ranking it first from then on;
   forgettable via *Clear search memory* in Settings
+- **Rotate the display** — a second hotkey (`Ctrl+Alt+R` by default) cycles the
+  monitor under the cursor through landscape → portrait → portrait (flipped),
+  for swapping between a tall screen for work and a wide one for games
 - **Start with Windows** — toggle from the tray icon menu
 - Native C++ / Win32, single small executable, no dependencies, per-monitor DPI aware
 
-## The hotkey
+## The hotkeys
 
-**Settings → Hotkey → Set…** captures it: hold the modifiers, press the trigger
-key, let go. The trigger is whichever key you pressed last. Esc cancels, and the
-capture releases itself after 15 seconds, so it can never leave the keyboard
-swallowed.
+There are two, both captured the same way: **Settings → Hotkeys → Set…**, then
+hold the modifiers and press the trigger key and let go. The trigger is
+whichever key you pressed last. Esc cancels, and the capture releases itself
+after 15 seconds, so it can never leave the keyboard swallowed.
+
+### Opening the switcher
 
 Out of the box it is **Cmd+Tab**, where Cmd is whichever key
 [MacKeys](https://github.com/whatislaaaf/mackeys-windows) gives the *Ctrl (Mac
@@ -51,16 +57,36 @@ A hotkey captured while MacKeys is running records MacKeys' injected key, so it
 will not fire while MacKeys is paused. Capture a different chord if you want one
 that works without it.
 
+### Rotating the display
+
+**Ctrl+Alt+R** by default, and unlike the switcher hotkey it does not care where
+its keys come from: under MacKeys it reads as Cmd+Alt+R, without it as a plain
+physical Ctrl+Alt+R, and either fires it.
+
+Each press turns the monitor **the cursor is on** one step through:
+
+    Landscape → Portrait → Portrait (flipped) → Landscape
+
+Landscape (flipped) is not in the cycle — a monitor that starts there rotates on
+to Landscape. Which of the two portrait modes matches the way you physically
+turned the screen depends on the monitor, so press it twice if the first one
+comes out upside down. The change is written to the registry, so it survives a
+reboot, exactly as the Settings app's own dropdown does.
+
+`AltGr+R` is safe: AltGr arrives as *right* Alt, and the chord is bound to the
+left one by scancode.
+
 ## Usage
 
 | Key | Action |
 | --- | --- |
-| your hotkey (default `Cmd+Tab`) | Open the switcher (opens on the monitor with the cursor) |
+| your hotkey (default `Cmd+Tab`) | Open the switcher (centred on the monitor with the cursor) |
 | `Cmd+Tab` again / `Tab` / `↓` | Move selection down |
 | `Cmd+Shift+Tab` / `Shift+Tab` / `↑` | Move selection up |
 | type letters | Fuzzy-filter the window list |
 | `Enter` | Activate the selected window |
 | `Esc` | Dismiss without switching |
+| `Ctrl+Alt+R` (default) | Rotate the monitor under the cursor one step |
 
 Monopane lives in the system tray. Right-click the tray icon for
 **Start with Windows** and **Exit**.

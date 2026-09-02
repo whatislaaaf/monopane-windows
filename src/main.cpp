@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "aliases.h"
+#include "display.h"
 #include "fuzzy.h"
 #include "settings.h"
 #include "window_list.h"
@@ -38,6 +39,7 @@ constexpr ULONG_PTR kMacKeysMarker = 0x4D4B5953;
 
 constexpr UINT WM_APP_HOTKEY = WM_APP + 1;  // wParam: 1 = shift held (cycle up)
 constexpr UINT WM_APP_TRAY = WM_APP + 2;
+constexpr UINT WM_APP_ROTATE = WM_APP + 3;
 
 constexpr UINT IDC_SEARCH_EDIT = 100;
 constexpr UINT IDM_EXIT = 201;
@@ -185,8 +187,15 @@ void LayoutOverlay(bool reposition)
         HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
         MONITORINFO mi{ sizeof(mi) };
         GetMonitorInfoW(monitor, &mi);
+        // Centred on the work area, so the overlay lands in the middle of the
+        // screen whichever way the monitor is turned. The vertical centring is
+        // measured against a *full* list rather than the current one: the
+        // window grows and shrinks as the search filters, and anchoring the top
+        // edge to the height it would have at full size keeps it from
+        // creeping up the screen with every keystroke.
+        const int fullHeight = searchH + MAX_VISIBLE_ROWS * rowH + pad;
         x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - width) / 2;
-        y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top) / 5;
+        y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - fullHeight) / 2;
     } else {
         flags |= SWP_NOMOVE;
     }
@@ -516,6 +525,20 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                     return 1; // the trigger belongs to the switcher
                 }
             }
+
+            // Rotating the display takes the better part of a second, and a
+            // low-level hook that blocks for that long gets torn out by
+            // Windows — so the work happens on the message loop.
+            const keychord::KeyChord& rotate = g_settings.rotateHotkey;
+            if (down && keychord::ChordValid(rotate) && id == rotate.trigger &&
+                (rotate.triggerOrigin == keychord::KeyOrigin::Any ||
+                 rotate.triggerOrigin == origin)) {
+                PruneStaleHeld();
+                if (keychord::ChordMatches(rotate, g_held, g_heldCount, /*exact=*/false)) {
+                    PostMessageW(g_hwndOverlay, WM_APP_ROTATE, 0, 0);
+                    return 1;
+                }
+            }
         }
     }
     return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
@@ -584,6 +607,13 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             ShowOverlay();
         else
             MoveSelection(wParam ? -1 : 1);
+        return 0;
+
+    case WM_APP_ROTATE:
+        // The switcher is sized to the monitor it opens on, so a rotation
+        // underneath it would leave it stale; it reopens re-laid-out.
+        HideOverlay();
+        CycleOrientation();
         return 0;
 
     case WM_APP_TRAY:
