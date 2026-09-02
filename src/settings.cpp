@@ -61,20 +61,34 @@ void WriteAscii(HKEY key, const wchar_t* name, const std::string& value)
 // prompt), so it is only called when the checkbox actually changed.
 bool g_autoStartAtOpen = false;
 
-// The dialog edits this copy; g_settings.hotkey only changes on OK.
+// The dialog edits these copies; g_settings only changes on OK.
 keychord::KeyChord g_editHotkey;
-bool g_capturing = false;
+keychord::KeyChord g_editRotate;
 
-void ShowHotkey(HWND dlg)
+// Which of the two chords the running capture is for, if any.
+enum class Capturing { None, Hotkey, Rotate };
+Capturing g_capturing = Capturing::None;
+
+void ShowHotkeys(HWND dlg)
 {
-    SetDlgItemTextW(dlg, IDC_TXT_HOTKEY, keychord::DescribeChord(g_editHotkey).c_str());
-    EnableWindow(GetDlgItem(dlg, IDC_BTN_HOTKEY), !g_capturing);
+    const bool busy = g_capturing != Capturing::None;
+    SetDlgItemTextW(dlg, IDC_TXT_HOTKEY,
+                    g_capturing == Capturing::Hotkey
+                        ? L"Press it now…"
+                        : keychord::DescribeChord(g_editHotkey).c_str());
+    SetDlgItemTextW(dlg, IDC_TXT_ROTATE,
+                    g_capturing == Capturing::Rotate
+                        ? L"Press it now…"
+                        : keychord::DescribeChord(g_editRotate).c_str());
+    EnableWindow(GetDlgItem(dlg, IDC_BTN_HOTKEY), !busy);
+    EnableWindow(GetDlgItem(dlg, IDC_BTN_ROTATE), !busy);
     SetDlgItemTextW(dlg, IDC_TXT_HOTKEY_HINT,
-                    g_capturing
+                    busy
                         ? L"Hold the modifiers and press the trigger key, then let go."
                           L"  (Esc cancels)"
                         : L"Left and right are told apart, and a key remapped by MacKeys "
-                          L"is told from a real one.");
+                          L"is told from a real one.  Rotating cycles the monitor under "
+                          L"the cursor: landscape → portrait → portrait (flipped).");
 }
 
 INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
@@ -88,29 +102,33 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
         CheckDlgButton(dlg, IDC_CHK_MATCH_APP, g_settings.matchAppName ? BST_CHECKED : BST_UNCHECKED);
         g_autoStartAtOpen = IsAutoStartEnabled();
         CheckDlgButton(dlg, IDC_CHK_AUTOSTART, g_autoStartAtOpen ? BST_CHECKED : BST_UNCHECKED);
-        g_capturing = false;
+        g_capturing = Capturing::None;
         g_editHotkey = g_settings.hotkey;
-        ShowHotkey(dlg);
+        g_editRotate = g_settings.rotateHotkey;
+        ShowHotkeys(dlg);
         return TRUE;
 
     case keychord::WM_CHORD_CAPTURED:
-        g_capturing = false;
-        g_editHotkey = keychord::CapturedChord();
-        ShowHotkey(dlg);
+        if (g_capturing == Capturing::Rotate)
+            g_editRotate = keychord::CapturedChord();
+        else
+            g_editHotkey = keychord::CapturedChord();
+        g_capturing = Capturing::None;
+        ShowHotkeys(dlg);
         return TRUE;
 
     case keychord::WM_CHORD_CANCELLED:
-        g_capturing = false;
-        ShowHotkey(dlg);
+        g_capturing = Capturing::None;
+        ShowHotkeys(dlg);
         return TRUE;
 
     // The only timer here is the capture backstop inside keychord, which stops
     // an abandoned capture swallowing every keystroke.
     case WM_TIMER:
-        if (g_capturing) {
+        if (g_capturing != Capturing::None) {
             keychord::CancelChordCapture();
-            g_capturing = false;
-            ShowHotkey(dlg);
+            g_capturing = Capturing::None;
+            ShowHotkeys(dlg);
         }
         return TRUE;
 
@@ -118,14 +136,21 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
         // Closing mid-capture would leave the hook eating keys with nowhere
         // to deliver them.
         keychord::CancelChordCapture();
-        g_capturing = false;
+        g_capturing = Capturing::None;
         return FALSE;
 
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDC_BTN_HOTKEY:
-            g_capturing = keychord::BeginChordCapture(dlg);
-            ShowHotkey(dlg);
+            if (keychord::BeginChordCapture(dlg))
+                g_capturing = Capturing::Hotkey;
+            ShowHotkeys(dlg);
+            return TRUE;
+
+        case IDC_BTN_ROTATE:
+            if (keychord::BeginChordCapture(dlg))
+                g_capturing = Capturing::Rotate;
+            ShowHotkeys(dlg);
             return TRUE;
 
         case IDOK: {
@@ -135,6 +160,8 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
             g_settings.matchAppName = IsDlgButtonChecked(dlg, IDC_CHK_MATCH_APP) == BST_CHECKED;
             if (keychord::ChordValid(g_editHotkey))
                 g_settings.hotkey = g_editHotkey;
+            if (keychord::ChordValid(g_editRotate))
+                g_settings.rotateHotkey = g_editRotate;
             SaveSettings();
             const bool autoStart = IsDlgButtonChecked(dlg, IDC_CHK_AUTOSTART) == BST_CHECKED;
             if (autoStart != g_autoStartAtOpen)
@@ -172,9 +199,22 @@ void DefaultHotkey(keychord::KeyChord& out)
     out.triggerOrigin = keychord::KeyOrigin::Physical;
 }
 
+void DefaultRotateHotkey(keychord::KeyChord& out)
+{
+    // Origin::Any throughout: under MacKeys the left Ctrl arrives injected and
+    // this reads as Cmd+Alt+R, without it the physical Ctrl+Alt+R does the same
+    // job. Nothing here needs the two told apart.
+    out = keychord::KeyChord();
+    out.mods[0] = 0x1D;  // left ctrl
+    out.mods[1] = 0x38;  // left alt
+    out.modCount = 2;
+    out.trigger = 0x13;  // R
+}
+
 void LoadSettings()
 {
     DefaultHotkey(g_settings.hotkey);
+    DefaultRotateHotkey(g_settings.rotateHotkey);
 
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
@@ -190,6 +230,10 @@ void LoadSettings()
     if (!stored.empty() && keychord::ParseChord(stored, parsed))
         g_settings.hotkey = parsed;
 
+    const std::string storedRotate = ReadAscii(key, L"RotateHotkey");
+    if (!storedRotate.empty() && keychord::ParseChord(storedRotate, parsed))
+        g_settings.rotateHotkey = parsed;
+
     RegCloseKey(key);
 }
 
@@ -203,6 +247,7 @@ void SaveSettings()
     WriteBool(key, L"PreselectPrevious", g_settings.preselectPrevious);
     WriteBool(key, L"MatchAppName", g_settings.matchAppName);
     WriteAscii(key, L"Hotkey", keychord::FormatChord(g_settings.hotkey));
+    WriteAscii(key, L"RotateHotkey", keychord::FormatChord(g_settings.rotateHotkey));
     RegCloseKey(key);
 }
 
