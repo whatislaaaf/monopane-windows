@@ -15,6 +15,8 @@ struct Settings {
     keychord::KeyChord hotkey;
     // The chord that rotates the monitor under the cursor, likewise captured.
     keychord::KeyChord rotateHotkey;
+    // The chord that opens the launchpad, likewise captured.
+    keychord::KeyChord launchpadHotkey;
 };
 
 extern Settings g_settings;
@@ -27,6 +29,10 @@ void DefaultHotkey(keychord::KeyChord& out);
 // The out-of-the-box rotate hotkey: Ctrl+Alt+R, taken however the keys arrive,
 // so it works under MacKeys (where it reads as Cmd+Alt+R) and without it alike.
 void DefaultRotateHotkey(keychord::KeyChord& out);
+
+// The out-of-the-box launchpad hotkey: Left Ctrl+Space, however the keys
+// arrive — the Spotlight position.
+void DefaultLaunchpadHotkey(keychord::KeyChord& out);
 
 // Persisted under HKCU\Software\Monopane.
 void LoadSettings();
