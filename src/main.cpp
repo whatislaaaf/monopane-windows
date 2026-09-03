@@ -52,18 +52,15 @@ constexpr UINT IDM_SETTINGS = 202;
 constexpr UINT IDM_LAUNCHPAD = 203;
 constexpr UINT TRAY_ICON_ID = 1;
 
+// As many rows as will be shown at once, before the list scrolls. A short
+// screen may fit fewer; g_visibleRows is what the layout settled on.
 constexpr int MAX_VISIBLE_ROWS = 10;
+int g_visibleRows = MAX_VISIBLE_ROWS;
 
-// Base (96-dpi) metrics.
-constexpr int BASE_WIDTH = 600;
-constexpr int BASE_SEARCH_H = 56;
+// Base (96-dpi) metrics. The width, the search box and the padding are shared
+// with the launchpad; see theme.h.
 constexpr int BASE_ROW_H = 44;
-constexpr int BASE_PAD = 10;
 constexpr int BASE_ICON = 24;
-
-// What Windows 11 rounds a window's own corners by, so the search box can be
-// rounded to match the frame around it.
-constexpr int BASE_CORNER = 8;
 
 
 HINSTANCE g_hInstance = nullptr;
@@ -137,7 +134,7 @@ void CreateFonts()
 RECT SearchPlateRect()
 {
     const int pad = Scale(BASE_PAD);
-    return RECT{ pad, pad, Scale(BASE_WIDTH) - pad, Scale(BASE_SEARCH_H) - Scale(4) };
+    return RECT{ pad, pad, Scale(BASE_PANEL_WIDTH) - pad, Scale(BASE_SEARCH_H) - Scale(4) };
 }
 
 // ---------------------------------------------------------------------------
@@ -190,8 +187,8 @@ void EnsureSelectionVisible()
 {
     if (g_selected < g_scrollTop)
         g_scrollTop = g_selected;
-    else if (g_selected >= g_scrollTop + MAX_VISIBLE_ROWS)
-        g_scrollTop = g_selected - MAX_VISIBLE_ROWS + 1;
+    else if (g_selected >= g_scrollTop + g_visibleRows)
+        g_scrollTop = g_selected - g_visibleRows + 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,38 +196,38 @@ void EnsureSelectionVisible()
 
 void LayoutOverlay(bool reposition)
 {
-    const int width = Scale(BASE_WIDTH);
+    const int width = Scale(BASE_PANEL_WIDTH);
     const int searchH = Scale(BASE_SEARCH_H);
     const int rowH = Scale(BASE_ROW_H);
     const int pad = Scale(BASE_PAD);
 
-    int rows = std::min(static_cast<int>(g_filtered.size()), MAX_VISIBLE_ROWS);
+    // On the monitor the cursor is on when opening; on the one it is already
+    // on when the list is merely re-filtering.
+    HMONITOR monitor;
+    if (reposition) {
+        POINT cursor;
+        GetCursorPos(&cursor);
+        monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+    } else {
+        monitor = MonitorFromWindow(g_hwndOverlay, MONITOR_DEFAULTTOPRIMARY);
+    }
+    MONITORINFO mi{ sizeof(mi) };
+    GetMonitorInfoW(monitor, &mi);
+
+    // The search box sits on the middle of the work area, the same line the
+    // launchpad puts its own on, and the list hangs below it. The top is fixed
+    // whatever the list is doing, so nothing creeps up the screen as a search
+    // narrows it, and nothing jumps when the launchpad opens instead.
+    const int top = PanelTop(mi.rcWork, SearchPlateRect());
+    g_visibleRows = std::min(RowsThatFit(mi.rcWork, top, searchH, pad, rowH), MAX_VISIBLE_ROWS);
+
+    int rows = std::min(static_cast<int>(g_filtered.size()), g_visibleRows);
     if (rows == 0)
         rows = 1;  // room for the "no matching windows" row
     const int height = searchH + rows * rowH + pad;
 
-    UINT flags = SWP_NOACTIVATE;
-    int x = 0, y = 0;
-    if (reposition) {
-        POINT cursor;
-        GetCursorPos(&cursor);
-        HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
-        MONITORINFO mi{ sizeof(mi) };
-        GetMonitorInfoW(monitor, &mi);
-        // Centred on the work area, so the overlay lands in the middle of the
-        // screen whichever way the monitor is turned. The vertical centring is
-        // measured against a *full* list rather than the current one: the
-        // window grows and shrinks as the search filters, and anchoring the top
-        // edge to the height it would have at full size keeps it from
-        // creeping up the screen with every keystroke.
-        const int fullHeight = searchH + MAX_VISIBLE_ROWS * rowH + pad;
-        x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - width) / 2;
-        y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - fullHeight) / 2;
-    } else {
-        flags |= SWP_NOMOVE;
-    }
-
-    SetWindowPos(g_hwndOverlay, HWND_TOPMOST, x, y, width, height, flags);
+    const int x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - width) / 2;
+    SetWindowPos(g_hwndOverlay, HWND_TOPMOST, x, top, width, height, SWP_NOACTIVATE);
 
     // One line tall, centred in the plate: see CreateFonts.
     const RECT plate = SearchPlateRect();
@@ -345,7 +342,7 @@ void PaintOverlay(HDC hdc, const RECT& client)
                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    const int last = std::min(static_cast<int>(g_filtered.size()), g_scrollTop + MAX_VISIBLE_ROWS);
+    const int last = std::min(static_cast<int>(g_filtered.size()), g_scrollTop + g_visibleRows);
     for (int i = g_scrollTop; i < last; ++i) {
         const WindowInfo& win = g_windows[g_filtered[i]];
         const int y = searchH + (i - g_scrollTop) * rowH;
@@ -396,7 +393,7 @@ int RowFromPoint(int yPos)
     if (yPos < searchH)
         return -1;
     const int row = g_scrollTop + (yPos - searchH) / rowH;
-    if (row >= static_cast<int>(g_filtered.size()) || row >= g_scrollTop + MAX_VISIBLE_ROWS)
+    if (row >= static_cast<int>(g_filtered.size()) || row >= g_scrollTop + g_visibleRows)
         return -1;
     return row;
 }
@@ -418,10 +415,10 @@ bool HandleNavigationKey(WPARAM vk)
         MoveSelection((GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1);
         return true;
     case VK_NEXT:
-        MoveSelection(MAX_VISIBLE_ROWS);
+        MoveSelection(g_visibleRows);
         return true;
     case VK_PRIOR:
-        MoveSelection(-MAX_VISIBLE_ROWS);
+        MoveSelection(-g_visibleRows);
         return true;
     case VK_RETURN:
         ActivateSelection();

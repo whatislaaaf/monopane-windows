@@ -13,8 +13,8 @@ big as you want it.
 ## Features
 
 - **A hotkey you capture by pressing it** opens a searchable overlay (via a
-  low-level keyboard hook; native Alt+Tab is left untouched), centred on the
-  monitor the cursor is on
+  low-level keyboard hook; native Alt+Tab is left untouched), on the monitor
+  the cursor is on
 - **Fuzzy search** over app name and window title — `chr` matches *Google Chrome*,
   `vsc` matches *Visual Studio Code*
 - **Keyboard navigation** — Up/Down arrows, Tab / Shift+Tab, PageUp/PageDown,
@@ -96,8 +96,10 @@ no longer does, and it is the launchpad's.
 
 ## The launchpad
 
-A panel centred on the monitor with the cursor: a search box, a pencil, and a
-six-wide grid of icons. Type to filter it, arrows move the highlight, **Enter**
+A panel on the monitor with the cursor: a search box, a pencil, and a
+six-wide grid of icons. It is the same width as the switcher and puts its
+search box on exactly the same line — the middle of the screen — so the two
+do not jump around each other as you flip between them. Type to filter it, arrows move the highlight, **Enter**
 or a click opens the app, **Esc** closes. Opening an app that already has a
 window brings that window forward; **Shift+Enter** or Shift+click starts a
 fresh instance regardless. Search memory works here too.
@@ -125,7 +127,7 @@ it the next time it opens.
 
 | Key | Action |
 | --- | --- |
-| your hotkey (default `Cmd+Tab`) | Open the switcher (centred on the monitor with the cursor) |
+| your hotkey (default `Cmd+Tab`) | Open the switcher (on the monitor with the cursor) |
 | `Cmd+Tab` again / `Tab` / `↓` | Move selection down |
 | `Cmd+Shift+Tab` / `Shift+Tab` / `↑` | Move selection up |
 | type letters | Fuzzy-filter the window list |
