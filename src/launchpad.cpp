@@ -81,9 +81,25 @@ int g_renaming = -1;            // into g_apps
 std::vector<InstalledApp> g_installed;
 int g_installedPx = 0;
 
+// Where the cursor was when a mouse move was last acted on, in screen
+// coordinates. The panel resizes under a stationary cursor as a search
+// filters the grid, and Windows reports that as a mouse move; acting on it
+// would drag the selection off what was typed. See the switcher.
+POINT g_lastMouseScreen{};
+
 int Scale(int value)
 {
     return MulDiv(value, g_dpi, 96);
+}
+
+bool MouseActuallyMoved(POINT client)
+{
+    POINT screen = client;
+    ClientToScreen(g_hwnd, &screen);
+    if (screen.x == g_lastMouseScreen.x && screen.y == g_lastMouseScreen.y)
+        return false;
+    g_lastMouseScreen = screen;
+    return true;
 }
 
 void CreateFonts()
@@ -1105,6 +1121,8 @@ void OnMouseDown(POINT pt)
 
 void OnMouseMove(POINT pt)
 {
+    if (!MouseActuallyMoved(pt))
+        return;
     if (g_mouseDown && !g_dragging) {
         if (abs(pt.x - g_downPt.x) > Scale(4) || abs(pt.y - g_downPt.y) > Scale(4))
             g_dragging = true;
@@ -1304,6 +1322,8 @@ void ShowLaunchpad()
     ApplyFilter(true);
     Layout(true);
 
+    // Opening under a cursor that is already sitting there is not a hover.
+    GetCursorPos(&g_lastMouseScreen);
     g_visible = true;
     g_shownTick = GetTickCount();
     ShowWindow(g_hwnd, SW_SHOW);
