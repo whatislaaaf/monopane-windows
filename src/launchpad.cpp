@@ -25,18 +25,13 @@ constexpr wchar_t kClass[] = L"MonopaneLaunchpad";
 
 constexpr int COLS = 6;
 
-// Base (96-dpi) metrics.
-constexpr int BASE_TILE_W = 110;
+// Base (96-dpi) metrics. The width, the search box and the padding are shared
+// with the switcher; see theme.h. Tile width is measured out of that width
+// rather than fixed, so the two panels are the same size to the pixel.
 constexpr int BASE_TILE_H = 96;
 constexpr int BASE_ICON = 48;
-constexpr int BASE_PAD = 10;
-constexpr int BASE_SEARCH_H = 56;
 constexpr int BASE_BADGE_R = 9;
 constexpr int BASE_PICK_ICON = 16;
-
-// What Windows 11 rounds a window's own corners by, so the search box can be
-// rounded to match the frame around it.
-constexpr int BASE_CORNER = 8;
 
 constexpr UINT IDC_SEARCH = 100;
 constexpr UINT IDC_RENAME = 101;
@@ -175,9 +170,19 @@ int GridTop()
     return Scale(BASE_SEARCH_H);
 }
 
+int PanelWidth()
+{
+    return Scale(BASE_PANEL_WIDTH);
+}
+
+int TileWidth()
+{
+    return (PanelWidth() - Scale(BASE_PAD) * 2) / COLS;
+}
+
 RECT TileRect(int tile)
 {
-    const int tileW = Scale(BASE_TILE_W);
+    const int tileW = TileWidth();
     const int tileH = Scale(BASE_TILE_H);
     const int pad = Scale(BASE_PAD);
     const int col = tile % COLS;
@@ -211,11 +216,6 @@ RECT BadgeRectIn(const RECT& tile)
     return RECT{ cx - r, cy - r, cx + r, cy + r };
 }
 
-int PanelWidth()
-{
-    return Scale(BASE_PAD) * 2 + COLS * Scale(BASE_TILE_W);
-}
-
 // The plate the search box and the pencil sit on.
 RECT SearchPlateRect()
 {
@@ -235,7 +235,7 @@ int TileFromPoint(POINT pt)
     const int pad = Scale(BASE_PAD);
     if (pt.y < GridTop() || pt.x < pad)
         return -1;
-    const int col = (pt.x - pad) / Scale(BASE_TILE_W);
+    const int col = (pt.x - pad) / TileWidth();
     const int row = (pt.y - GridTop()) / Scale(BASE_TILE_H);
     if (col >= COLS || row >= g_rowsVisible)
         return -1;
@@ -248,7 +248,7 @@ int TileFromPoint(POINT pt)
 int DragSlotFromPoint(POINT pt)
 {
     const int pad = Scale(BASE_PAD);
-    const int col = std::clamp(static_cast<int>(pt.x - pad) / Scale(BASE_TILE_W), 0, COLS - 1);
+    const int col = std::clamp(static_cast<int>(pt.x - pad) / TileWidth(), 0, COLS - 1);
     const int row = std::clamp(static_cast<int>(pt.y - GridTop()) / Scale(BASE_TILE_H), 0,
                                g_rowsVisible - 1) +
                     g_scrollRow;
@@ -333,31 +333,23 @@ void Layout(bool reposition)
     }
     MONITORINFO mi{ sizeof(mi) };
     GetMonitorInfoW(monitor, &mi);
-    const int workH = mi.rcWork.bottom - mi.rcWork.top;
 
-    // As many rows as the apps need, up to what fits comfortably on screen;
-    // past that the grid scrolls.
-    const int maxRows = std::max(1, (workH * 4 / 5 - searchH - pad) / tileH);
+    // The search box sits on the middle of the work area, the same line the
+    // switcher puts its own on, and the grid hangs below it. The top is fixed
+    // whatever the grid is doing, so the box holds still as a search narrows
+    // it, as apps are added, and when the switcher opens instead.
+    const int top = PanelTop(mi.rcWork, SearchPlateRect());
+
+    // As many rows as the apps need, up to what fits below that line; past
+    // that the grid scrolls.
+    const int maxRows = RowsThatFit(mi.rcWork, top, searchH, pad, tileH);
     const int needed = RowsNeeded();
     g_rowsVisible = std::min(needed, maxRows);
     g_scrollRow = std::clamp(g_scrollRow, 0, std::max(0, needed - g_rowsVisible));
     const int height = searchH + g_rowsVisible * tileH + pad;
 
-    UINT flags = SWP_NOACTIVATE;
-    int x = 0, y = 0;
-    if (reposition) {
-        // Centred against the unfiltered height, as the switcher does, so the
-        // panel does not creep up the screen as a search narrows it.
-        const int fullTiles = static_cast<int>(g_apps.size()) + (g_editMode ? 1 : 0);
-        const int fullRows = std::min(maxRows, std::max(1, (fullTiles + COLS - 1) / COLS));
-        const int fullHeight = searchH + fullRows * tileH + pad;
-        x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - width) / 2;
-        y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - fullHeight) / 2;
-    } else {
-        flags |= SWP_NOMOVE;
-    }
-
-    SetWindowPos(g_hwnd, HWND_TOPMOST, x, y, width, height, flags);
+    const int x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - width) / 2;
+    SetWindowPos(g_hwnd, HWND_TOPMOST, x, top, width, height, SWP_NOACTIVATE);
 
     // One line tall, centred in the plate: see CreateFonts.
     const RECT plate = SearchPlateRect();
@@ -752,7 +744,7 @@ void Activate(int tile, bool forceNew)
         return;
     if (IsPlusTile(tile)) {
         const RECT rc = TileRect(tile);
-        POINT pt{ rc.left + Scale(BASE_TILE_W) / 2, rc.top + Scale(BASE_ICON) + Scale(14) };
+        POINT pt{ rc.left + TileWidth() / 2, rc.top + Scale(BASE_ICON) + Scale(14) };
         ClientToScreen(g_hwnd, &pt);
         ShowAddMenu(pt);
         return;
@@ -949,7 +941,7 @@ void Paint(HDC hdc, const RECT& client)
         GetCursorPos(&cursor);
         ScreenToClient(g_hwnd, &cursor);
         RECT rc{ cursor.x - g_dragOffset.x, cursor.y - g_dragOffset.y, 0, 0 };
-        rc.right = rc.left + Scale(BASE_TILE_W);
+        rc.right = rc.left + TileWidth();
         rc.bottom = rc.top + Scale(BASE_TILE_H);
         DrawAppTile(mem, rc, g_apps[g_dragIndex], false, false, true);
     }
