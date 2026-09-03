@@ -395,8 +395,16 @@ bool ReadBitmapPixels(HBITMAP bitmap, int w, int h, std::vector<uint8_t>& out)
     return ok;
 }
 
+// Alpha at or above which a pixel counts as part of the icon rather than as
+// the soft edge around it.
+constexpr int kSolidAlpha = 160;
+
 // Turns what the shell hands back into a bitmap AlphaBlend can actually draw,
 // no larger than dstPx square.
+//
+// `minFillPercent` rejects a source whose solid art covers less than that
+// share of its canvas, by returning null. See ShellIcon: a bigger canvas is
+// not the same thing as bigger art.
 //
 // Two things are wrong with it as it arrives. The alpha is *straight*, not
 // premultiplied — measured, not assumed: a NordVPN edge pixel comes back
@@ -409,7 +417,7 @@ bool ReadBitmapPixels(HBITMAP bitmap, int w, int h, std::vector<uint8_t>& out)
 // And the frame is whatever size the app ships, stretched to the size asked
 // for. A 32-pixel frame pulled up to 48 is what makes an icon look
 // stair-stepped, so this asks for something much larger and averages it down.
-HBITMAP MakeIconBitmap(HBITMAP src, int dstPx)
+HBITMAP MakeIconBitmap(HBITMAP src, int dstPx, int minFillPercent)
 {
     BITMAP bm{};
     if (dstPx <= 0 || !GetObjectW(src, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0)
@@ -437,10 +445,27 @@ HBITMAP MakeIconBitmap(HBITMAP src, int dstPx)
 
     if (maxAlpha == 0) {
         // No alpha anywhere is an absence of transparency information rather
-        // than a wholly invisible icon.
+        // than a wholly invisible icon, and it covers the whole canvas.
         for (size_t i = 3; i < pixels.size(); i += 4)
             pixels[i] = 255;
-    } else if (straight) {
+    } else if (minFillPercent > 0) {
+        int left = sw, top = sh, right = -1, bottom = -1;
+        for (int y = 0; y < sh; ++y) {
+            for (int x = 0; x < sw; ++x) {
+                if (pixels[(static_cast<size_t>(y) * sw + x) * 4 + 3] < kSolidAlpha)
+                    continue;
+                if (x < left) left = x;
+                if (x > right) right = x;
+                if (y < top) top = y;
+                if (y > bottom) bottom = y;
+            }
+        }
+        const int span = std::max(right - left + 1, bottom - top + 1);
+        if (right < 0 || span * 100 < std::max(sw, sh) * minFillPercent)
+            return nullptr;
+    }
+
+    if (maxAlpha != 0 && straight) {
         for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
             const unsigned a = pixels[i + 3];
             for (int c = 0; c < 3; ++c)
@@ -516,23 +541,30 @@ HBITMAP ShellIcon(IShellItem* item, int px)
     // Ask for art well above the size it is drawn at, and let the shell hand
     // back something larger still rather than shrink it first: the bigger the
     // frame the average starts from, the smoother the result.
+    //
+    // But a bigger canvas is not the same as bigger art. Asked for 192, the
+    // shell returns some icons as their native 48 sitting in the middle of a
+    // 192 canvas rather than scaled up to fill it — measured: PowerToys and a
+    // plain .exe both came back covering a quarter of the width. Averaging
+    // that down to 48 would leave a 12-pixel icon adrift in the tile, so the
+    // big frame is only worth having when the art really does fill it.
     HBITMAP result = nullptr;
     HBITMAP raw = nullptr;
     const SIZE large{ px * 4, px * 4 };
     if (SUCCEEDED(factory->GetImage(large, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, &raw)) && raw) {
         BITMAP bm{};
         if (GetObjectW(raw, sizeof(bm), &bm) && bm.bmWidth >= px && bm.bmHeight >= px)
-            result = MakeIconBitmap(raw, px);
+            result = MakeIconBitmap(raw, px, 75);
         DeleteObject(raw);
         raw = nullptr;
     }
 
-    // Nothing bigger to work from: let the shell do the sizing, and fix up the
-    // alpha of whatever it produces.
+    // Nothing bigger to work from, or nothing that used the room: let the
+    // shell do the sizing, and take whatever it produces at that size.
     if (!result) {
         const SIZE exact{ px, px };
         if (SUCCEEDED(factory->GetImage(exact, SIIGBF_ICONONLY | SIIGBF_RESIZETOFIT, &raw)) && raw) {
-            result = MakeIconBitmap(raw, px);
+            result = MakeIconBitmap(raw, px, 0);
             if (result)
                 DeleteObject(raw);
             else
