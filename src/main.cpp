@@ -88,9 +88,29 @@ NOTIFYICONDATAW g_trayIcon{};
 // it is ever restarted. Either way the tray icon has to be added afresh.
 UINT g_taskbarCreatedMsg = 0;
 
+// Where the cursor was when a mouse move was last acted on, in screen
+// coordinates.
+//
+// Windows sends WM_MOUSEMOVE when a window moves or resizes under a cursor
+// that has not moved at all, and this overlay resizes on every keystroke as
+// the list filters. Taken at face value that silently drags the selection off
+// the best match and onto whatever row happened to slide under the pointer, so
+// a hover only counts when the pointer has actually been somewhere else.
+POINT g_lastMouseScreen{};
+
 int Scale(int value)
 {
     return MulDiv(value, g_dpi, 96);
+}
+
+bool MouseActuallyMoved(HWND hwnd, POINT client)
+{
+    POINT screen = client;
+    ClientToScreen(hwnd, &screen);
+    if (screen.x == g_lastMouseScreen.x && screen.y == g_lastMouseScreen.y)
+        return false;
+    g_lastMouseScreen = screen;
+    return true;
 }
 
 void CreateFonts()
@@ -257,6 +277,8 @@ void ShowOverlay()
         g_selected = 1;
 
     LayoutOverlay(true);
+    // Opening under a cursor that is already sitting there is not a hover.
+    GetCursorPos(&g_lastMouseScreen);
     g_overlayVisible = true;
     g_shownTick = GetTickCount();
     ShowWindow(g_hwndOverlay, SW_SHOW);
@@ -722,7 +744,10 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_MOUSEMOVE: {
-        const int row = RowFromPoint(GET_Y_LPARAM(lParam));
+        const POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (!MouseActuallyMoved(hwnd, pt))
+            return 0;
+        const int row = RowFromPoint(pt.y);
         if (row >= 0 && row != g_selected) {
             g_selected = row;
             InvalidateRect(hwnd, nullptr, TRUE);
