@@ -791,6 +791,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
         return 0;
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    LoadSettings();
+    LoadAliases();
 
     INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES };
     InitCommonControlsEx(&icc);
@@ -826,15 +828,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     // Started by the logon task, this is where the first seconds after sign-in
     // are spent; on a hand-launched run it returns at once.
     WaitForShell(60000);
-
-    // Only now, with the shell up and the profile therefore fully loaded.
-    // HKEY_CURRENT_USER is not dependable in the first moments of a logon: the
-    // task fires within seconds of sign-in, and reading settings there came
-    // back empty, so every stored hotkey quietly fell back to its default and
-    // the chords answered to the wrong keys until the next hand-launched run.
-    // Nothing between here and process start needs either of these.
-    LoadSettings();
-    LoadAliases();
 
     AddTrayIcon(hwnd);
 
