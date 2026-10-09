@@ -21,6 +21,10 @@ struct Settings {
 
 extern Settings g_settings;
 
+// The keyboard hook runs on its own thread and reads the three chords while
+// the settings dialog may be replacing them; both sides hold this around them.
+extern SRWLOCK g_hotkeyLock;
+
 // The out-of-the-box hotkey: MacKeys' injected left Ctrl, then Tab. The
 // injected origin is what leaves a genuine physical Ctrl+Tab alone, so in-app
 // tab switching keeps working.
