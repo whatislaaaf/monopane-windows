@@ -1,0 +1,85 @@
+#include <winres.h>
+#include "resource.h"
+
+1 RT_MANIFEST "mackeys.manifest"
+
+IDI_APP ICON "mackeys.ico"
+
+IDD_SETTINGS DIALOGEX 0, 0, 420, 300
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "MacKeys settings"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    CONTROL         "", IDC_TAB, "SysTabControl32", TCS_TABS | WS_TABSTOP,
+                    6, 6, 408, 260
+    PUSHBUTTON      "Open config folder", IDC_BTN_CONFIGFOLDER, 6, 278, 90, 14
+    DEFPUSHBUTTON   "OK", IDOK, 308, 278, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 362, 278, 50, 14
+END
+
+IDD_TAB_KEYS DIALOGEX 0, 0, 400, 242
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    CONTROL         "Base layer", IDC_RAD_BASE, "Button",
+                    BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 8, 6, 55, 10
+    CONTROL         "Nav layer (while a layer key is held)", IDC_RAD_NAV, "Button",
+                    BS_AUTORADIOBUTTON | WS_TABSTOP, 70, 6, 140, 10
+    CONTROL         "", IDC_KEYBOARD, "MacKeysKeyboard",
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP, 8, 20, 384, 152
+    LTEXT           "", IDC_TXT_STATUS, 8, 180, 384, 18
+    LTEXT           "Left-click a key to capture what it should send. Right-click for the layer, Windows and Ctrl roles, or to clear.",
+                    -1, 8, 206, 384, 10
+    LTEXT           "A key marked with a diamond holds a role rather than sending another key.",
+                    -1, 8, 220, 384, 10
+END
+
+IDD_TAB_OPTIONS DIALOGEX 0, 0, 400, 242
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "Hotkeys", -1, 8, 6, 384, 106
+    LISTBOX         IDC_LST_CHORDS, 16, 20, 288, 66,
+                    LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    PUSHBUTTON      "Add...", IDC_BTN_CHORD_ADD, 310, 20, 70, 14
+    PUSHBUTTON      "Set keys...", IDC_BTN_CHORD_SET, 310, 38, 70, 14
+    PUSHBUTTON      "Remove", IDC_BTN_CHORD_DEL, 310, 56, 70, 14
+    LTEXT           "", IDC_TXT_CHORD_HINT, 16, 92, 364, 16
+
+    GROUPBOX        "Keyboard", -1, 8, 118, 384, 40
+    LTEXT           "Layout:", -1, 16, 134, 30, 8
+    COMBOBOX        IDC_CMB_LAYOUT, 50, 131, 90, 60,
+                    CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Reset all keys to defaults", IDC_BTN_RESETDEFAULTS, 150, 131, 110, 14
+
+    GROUPBOX        "Kernel Scancode Map", -1, 8, 164, 384, 62
+    LTEXT           "", IDC_TXT_SCMAP, 16, 178, 300, 42
+    PUSHBUTTON      "Remove", IDC_BTN_SCMAP_RESET, 320, 178, 60, 14
+
+    CONTROL         "Start with Windows", IDC_CHK_AUTOSTART,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 230, 360, 10
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,1,0,0
+ PRODUCTVERSION 1,1,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "FileDescription", "MacKeys"
+            VALUE "FileVersion", "1.1.0.0"
+            VALUE "InternalName", "mackeys"
+            VALUE "OriginalFilename", "mackeys.exe"
+            VALUE "ProductName", "MacKeys"
+            VALUE "ProductVersion", "1.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
