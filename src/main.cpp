@@ -534,7 +534,14 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                     --g_heldCount;
             }
 
-            const keychord::KeyChord& hotkey = g_settings.hotkey;
+            // Copies, taken under the lock: this runs on the hook thread while
+            // the settings dialog may be replacing them.
+            AcquireSRWLockShared(&g_hotkeyLock);
+            const keychord::KeyChord hotkey = g_settings.hotkey;
+            const keychord::KeyChord rotate = g_settings.rotateHotkey;
+            const keychord::KeyChord launchpad = g_settings.launchpadHotkey;
+            ReleaseSRWLockShared(&g_hotkeyLock);
+
             if (down && id == hotkey.trigger &&
                 (hotkey.triggerOrigin == keychord::KeyOrigin::Any ||
                  hotkey.triggerOrigin == origin)) {
@@ -551,7 +558,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
             // Rotating the display takes the better part of a second, and a
             // low-level hook that blocks for that long gets torn out by
             // Windows — so the work happens on the message loop.
-            const keychord::KeyChord& rotate = g_settings.rotateHotkey;
             if (down && keychord::ChordValid(rotate) && id == rotate.trigger &&
                 (rotate.triggerOrigin == keychord::KeyOrigin::Any ||
                  rotate.triggerOrigin == origin)) {
@@ -565,7 +571,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
             // Loose like the others: under MacKeys the physical key behind
             // the chord's modifier may still be seen down alongside the one
             // MacKeys injects for it, and an exact match would refuse that.
-            const keychord::KeyChord& launchpad = g_settings.launchpadHotkey;
             if (down && keychord::ChordValid(launchpad) && id == launchpad.trigger &&
                 (launchpad.triggerOrigin == keychord::KeyOrigin::Any ||
                  launchpad.triggerOrigin == origin)) {
@@ -578,6 +583,68 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
         }
     }
     return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
+}
+
+// The hook lives on a thread of its own that does nothing but answer it.
+//
+// A low-level hook is called on the thread that installed it, through that
+// thread's message queue, and Windows only waits so long for an answer
+// (LowLevelHooksTimeout). Miss it once and the hook is dropped without a word
+// — the process stays up, the tray icon stays put, and no key is seen again.
+// On the UI thread anything slow could cause that: a Shell_NotifyIcon call
+// blocking on a taskbar still starting at logon, icon extraction, a window
+// that is slow to answer while the switcher lists them. Here there is nothing
+// to wait on, and everything the hook decides is posted to the UI thread.
+DWORD g_hookThreadId = 0;
+HANDLE g_hookThread = nullptr;
+HANDLE g_hookReady = nullptr;
+
+DWORD WINAPI HookThreadProc(LPVOID)
+{
+    // Keystrokes stall behind this thread, so it should get the CPU first
+    // when the machine is busy, as it is in the first minute after logon.
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+
+    // Make sure the queue exists before the main thread can post WM_QUIT to it.
+    MSG msg;
+    PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+
+    g_keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, g_hInstance, 0);
+    SetEvent(g_hookReady);
+    if (!g_keyboardHook)
+        return 1;
+
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    }
+
+    UnhookWindowsHookEx(g_keyboardHook);
+    return 0;
+}
+
+bool StartHookThread()
+{
+    g_hookReady = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!g_hookReady)
+        return false;
+    g_hookThread = CreateThread(nullptr, 0, HookThreadProc, nullptr, 0, &g_hookThreadId);
+    if (!g_hookThread)
+        return false;
+    WaitForSingleObject(g_hookReady, INFINITE);
+    return g_keyboardHook != nullptr;
+}
+
+void StopHookThread()
+{
+    if (g_hookThread) {
+        PostThreadMessageW(g_hookThreadId, WM_QUIT, 0, 0);
+        WaitForSingleObject(g_hookThread, 2000);
+        CloseHandle(g_hookThread);
+        g_hookThread = nullptr;
+    }
+    if (g_hookReady) {
+        CloseHandle(g_hookReady);
+        g_hookReady = nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -853,19 +920,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 
     AddTrayIcon(hwnd);
 
-    // The hook goes in last, with nothing between it and the pump below.
-    //
-    // A low-level hook is dispatched on this thread's message queue, so a hook
-    // installed while the thread is still busy elsewhere has to wait for the
-    // work to finish before it can answer. Windows only waits so long
-    // (LowLevelHooksTimeout) and then quietly drops the hook — the process
-    // stays up, the tray icon stays put, and no key is ever seen again. At
-    // logon, where Shell_NotifyIcon above can block on a taskbar that is itself
-    // still starting, that gap was wide enough to lose the hook now and then.
-    g_keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, hInstance, 0);
-    if (!g_keyboardHook) {
+    // On its own thread, so nothing this one does can make Windows drop it;
+    // see HookThreadProc.
+    if (!StartHookThread()) {
         MessageBoxW(nullptr, L"Failed to install the keyboard hook.",
                     L"Monopane", MB_ICONERROR);
+        StopHookThread();
         DestroyWindow(hwnd);
         return 1;
     }
@@ -876,7 +936,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
         DispatchMessageW(&msg);
     }
 
-    UnhookWindowsHookEx(g_keyboardHook);
+    StopHookThread();
     ClearIconCache();
     DestroyLaunchpadResources();
     if (g_fontApp) DeleteObject(g_fontApp);

@@ -7,6 +7,7 @@
 #include "../res/resource.h"
 
 Settings g_settings;
+SRWLOCK g_hotkeyLock = SRWLOCK_INIT;
 
 namespace {
 
@@ -139,6 +140,11 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
             keychord::CancelChordCapture();
             g_capturing = Capturing::None;
             ShowHotkeys(dlg);
+        } else {
+            // A capture that completed in the hook could not stop this: the
+            // hook runs on its own thread, and KillTimer only works on the
+            // window's. Stop it on its first tick instead.
+            KillTimer(dlg, wParam);
         }
         return TRUE;
 
@@ -178,12 +184,14 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
             g_settings.activateAllOfApp = IsDlgButtonChecked(dlg, IDC_CHK_ACTIVATE_ALL) == BST_CHECKED;
             g_settings.preselectPrevious = IsDlgButtonChecked(dlg, IDC_CHK_PRESELECT) == BST_CHECKED;
             g_settings.matchAppName = IsDlgButtonChecked(dlg, IDC_CHK_MATCH_APP) == BST_CHECKED;
+            AcquireSRWLockExclusive(&g_hotkeyLock);
             if (keychord::ChordValid(g_editHotkey))
                 g_settings.hotkey = g_editHotkey;
             if (keychord::ChordValid(g_editRotate))
                 g_settings.rotateHotkey = g_editRotate;
             if (keychord::ChordValid(g_editLaunchpad))
                 g_settings.launchpadHotkey = g_editLaunchpad;
+            ReleaseSRWLockExclusive(&g_hotkeyLock);
             SaveSettings();
             const bool autoStart = IsDlgButtonChecked(dlg, IDC_CHK_AUTOSTART) == BST_CHECKED;
             if (autoStart != g_autoStartAtOpen)
