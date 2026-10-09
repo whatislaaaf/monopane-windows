@@ -14,6 +14,11 @@ add_executable(monopane WIN32
     src/launchpad.cpp
     src/launchpad_apps.cpp
     src/paint.cpp
+    src/remap.cpp
+    src/config.cpp
+    src/keyboard.cpp
+    src/scancodemap.cpp
+    src/keysettings.cpp
     external/keychord/keychord_name.cpp
     external/keychord/keychord_chord.cpp
     external/keychord/keychord_capture.cpp

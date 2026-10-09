@@ -6,7 +6,7 @@
 
 #include <vector>
 
-const wchar_t kKeyboardClass[] = L"MacKeysKeyboard";
+const wchar_t kKeyboardClass[] = L"MonopaneKeyboard";
 
 namespace {
 

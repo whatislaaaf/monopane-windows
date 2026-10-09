@@ -21,17 +21,13 @@ struct Settings {
 
 extern Settings g_settings;
 
-// The keyboard hook runs on its own thread and reads the three chords while
-// the settings dialog may be replacing them; both sides hold this around them.
-extern SRWLOCK g_hotkeyLock;
-
-// The out-of-the-box hotkey: MacKeys' injected left Ctrl, then Tab. The
-// injected origin is what leaves a genuine physical Ctrl+Tab alone, so in-app
-// tab switching keeps working.
+// The out-of-the-box hotkey: the left Ctrl the key map injects for the Ctrl
+// (Mac cmd) role, then Tab. The injected origin is what leaves a genuine
+// physical Ctrl+Tab alone, so in-app tab switching keeps working.
 void DefaultHotkey(keychord::KeyChord& out);
 
 // The out-of-the-box rotate hotkey: Ctrl+Alt+R, taken however the keys arrive,
-// so it works under MacKeys (where it reads as Cmd+Alt+R) and without it alike.
+// so it works with and without a remapped Ctrl alike.
 void DefaultRotateHotkey(keychord::KeyChord& out);
 
 // The out-of-the-box launchpad hotkey: Left Ctrl+Space, however the keys
@@ -45,5 +41,7 @@ void SaveSettings();
 bool IsAutoStartEnabled();
 void SetAutoStart(bool enable);
 
-// Modal settings dialog; updates g_settings and persists on OK.
+// Modal settings dialog: the switcher's own tab, the two key-map tabs from
+// keysettings.h, and the options shared by all of them. Everything is applied
+// and persisted on OK.
 void ShowSettingsDialog(HWND owner, HINSTANCE instance);

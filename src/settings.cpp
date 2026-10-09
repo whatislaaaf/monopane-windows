@@ -1,13 +1,16 @@
 #include "settings.h"
 
+#include <commctrl.h>
+
 #include <string>
 
 #include "aliases.h"
-#include "launchpad.h"
+#include "config.h"
+#include "keysettings.h"
+#include "lock.h"
 #include "../res/resource.h"
 
 Settings g_settings;
-SRWLOCK g_hotkeyLock = SRWLOCK_INIT;
 
 namespace {
 
@@ -59,11 +62,9 @@ void WriteAscii(HKEY key, const wchar_t* name, const std::string& value)
                    static_cast<DWORD>((wide.size() + 1) * sizeof(wchar_t)));
 }
 
-// Autostart state when the dialog opened; SetAutoStart runs elevated (UAC
-// prompt), so it is only called when the checkbox actually changed.
-bool g_autoStartAtOpen = false;
+// ------------------------------------------------------------ switcher tab
 
-// The dialog edits these copies; g_settings only changes on OK.
+// The tab edits these copies; g_settings only changes on OK.
 keychord::KeyChord g_editHotkey;
 keychord::KeyChord g_editRotate;
 keychord::KeyChord g_editLaunchpad;
@@ -72,49 +73,45 @@ keychord::KeyChord g_editLaunchpad;
 enum class Capturing { None, Hotkey, Rotate, Launchpad };
 Capturing g_capturing = Capturing::None;
 
-void ShowHotkeys(HWND dlg)
+void ShowHotkeys(HWND page)
 {
     const bool busy = g_capturing != Capturing::None;
-    SetDlgItemTextW(dlg, IDC_TXT_HOTKEY,
+    SetDlgItemTextW(page, IDC_TXT_HOTKEY,
                     g_capturing == Capturing::Hotkey
                         ? L"Press it now…"
                         : keychord::DescribeChord(g_editHotkey).c_str());
-    SetDlgItemTextW(dlg, IDC_TXT_ROTATE,
+    SetDlgItemTextW(page, IDC_TXT_ROTATE,
                     g_capturing == Capturing::Rotate
                         ? L"Press it now…"
                         : keychord::DescribeChord(g_editRotate).c_str());
-    SetDlgItemTextW(dlg, IDC_TXT_LAUNCHPAD,
+    SetDlgItemTextW(page, IDC_TXT_LAUNCHPAD,
                     g_capturing == Capturing::Launchpad
                         ? L"Press it now…"
                         : keychord::DescribeChord(g_editLaunchpad).c_str());
-    EnableWindow(GetDlgItem(dlg, IDC_BTN_HOTKEY), !busy);
-    EnableWindow(GetDlgItem(dlg, IDC_BTN_ROTATE), !busy);
-    EnableWindow(GetDlgItem(dlg, IDC_BTN_LAUNCHPAD), !busy);
-    SetDlgItemTextW(dlg, IDC_TXT_HOTKEY_HINT,
+    EnableWindow(GetDlgItem(page, IDC_BTN_HOTKEY), !busy);
+    EnableWindow(GetDlgItem(page, IDC_BTN_ROTATE), !busy);
+    EnableWindow(GetDlgItem(page, IDC_BTN_LAUNCHPAD), !busy);
+    SetDlgItemTextW(page, IDC_TXT_HOTKEY_HINT,
                     busy
                         ? L"Hold the modifiers and press the trigger key, then let go."
                           L"  (Esc cancels)"
-                        : L"Left and right are told apart, and a key remapped by MacKeys "
+                        : L"Left and right are told apart, and a key the key map remaps "
                           L"is told from a real one.  Rotating cycles the monitor under "
                           L"the cursor: landscape → portrait → portrait (flipped).");
 }
 
-INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
+INT_PTR CALLBACK SwitcherTabProc(HWND page, UINT msg, WPARAM wParam, LPARAM)
 {
     switch (msg) {
     case WM_INITDIALOG:
-        SendMessageW(dlg, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(
-            LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP))));
-        CheckDlgButton(dlg, IDC_CHK_ACTIVATE_ALL, g_settings.activateAllOfApp ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(dlg, IDC_CHK_PRESELECT, g_settings.preselectPrevious ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(dlg, IDC_CHK_MATCH_APP, g_settings.matchAppName ? BST_CHECKED : BST_UNCHECKED);
-        g_autoStartAtOpen = IsAutoStartEnabled();
-        CheckDlgButton(dlg, IDC_CHK_AUTOSTART, g_autoStartAtOpen ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(page, IDC_CHK_ACTIVATE_ALL, g_settings.activateAllOfApp ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(page, IDC_CHK_PRESELECT, g_settings.preselectPrevious ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(page, IDC_CHK_MATCH_APP, g_settings.matchAppName ? BST_CHECKED : BST_UNCHECKED);
         g_capturing = Capturing::None;
         g_editHotkey = g_settings.hotkey;
         g_editRotate = g_settings.rotateHotkey;
         g_editLaunchpad = g_settings.launchpadHotkey;
-        ShowHotkeys(dlg);
+        ShowHotkeys(page);
         return TRUE;
 
     case keychord::WM_CHORD_CAPTURED:
@@ -122,15 +119,15 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
             g_editRotate = keychord::CapturedChord();
         else if (g_capturing == Capturing::Launchpad)
             g_editLaunchpad = keychord::CapturedChord();
-        else
+        else if (g_capturing == Capturing::Hotkey)
             g_editHotkey = keychord::CapturedChord();
         g_capturing = Capturing::None;
-        ShowHotkeys(dlg);
+        ShowHotkeys(page);
         return TRUE;
 
     case keychord::WM_CHORD_CANCELLED:
         g_capturing = Capturing::None;
-        ShowHotkeys(dlg);
+        ShowHotkeys(page);
         return TRUE;
 
     // The only timer here is the capture backstop inside keychord, which stops
@@ -139,80 +136,191 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM)
         if (g_capturing != Capturing::None) {
             keychord::CancelChordCapture();
             g_capturing = Capturing::None;
-            ShowHotkeys(dlg);
+            ShowHotkeys(page);
         } else {
             // A capture that completed in the hook could not stop this: the
             // hook runs on its own thread, and KillTimer only works on the
             // window's. Stop it on its first tick instead.
-            KillTimer(dlg, wParam);
+            KillTimer(page, wParam);
         }
         return TRUE;
-
-    case WM_DESTROY:
-        // Closing mid-capture would leave the hook eating keys with nowhere
-        // to deliver them.
-        keychord::CancelChordCapture();
-        g_capturing = Capturing::None;
-        return FALSE;
 
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDC_BTN_HOTKEY:
-            if (keychord::BeginChordCapture(dlg))
+            if (keychord::BeginChordCapture(page))
                 g_capturing = Capturing::Hotkey;
-            ShowHotkeys(dlg);
+            ShowHotkeys(page);
             return TRUE;
 
         case IDC_BTN_ROTATE:
-            if (keychord::BeginChordCapture(dlg))
+            if (keychord::BeginChordCapture(page))
                 g_capturing = Capturing::Rotate;
-            ShowHotkeys(dlg);
+            ShowHotkeys(page);
             return TRUE;
 
         case IDC_BTN_LAUNCHPAD:
-            if (keychord::BeginChordCapture(dlg))
+            if (keychord::BeginChordCapture(page))
                 g_capturing = Capturing::Launchpad;
-            ShowHotkeys(dlg);
+            ShowHotkeys(page);
             return TRUE;
 
-        case IDC_BTN_LAUNCHPAD_FOLDER:
-            OpenLaunchpadConfigFolder();
-            return TRUE;
-
-        case IDOK: {
-            keychord::CancelChordCapture();
-            g_settings.activateAllOfApp = IsDlgButtonChecked(dlg, IDC_CHK_ACTIVATE_ALL) == BST_CHECKED;
-            g_settings.preselectPrevious = IsDlgButtonChecked(dlg, IDC_CHK_PRESELECT) == BST_CHECKED;
-            g_settings.matchAppName = IsDlgButtonChecked(dlg, IDC_CHK_MATCH_APP) == BST_CHECKED;
-            AcquireSRWLockExclusive(&g_hotkeyLock);
-            if (keychord::ChordValid(g_editHotkey))
-                g_settings.hotkey = g_editHotkey;
-            if (keychord::ChordValid(g_editRotate))
-                g_settings.rotateHotkey = g_editRotate;
-            if (keychord::ChordValid(g_editLaunchpad))
-                g_settings.launchpadHotkey = g_editLaunchpad;
-            ReleaseSRWLockExclusive(&g_hotkeyLock);
-            SaveSettings();
-            const bool autoStart = IsDlgButtonChecked(dlg, IDC_CHK_AUTOSTART) == BST_CHECKED;
-            if (autoStart != g_autoStartAtOpen)
-                SetAutoStart(autoStart);
-            EndDialog(dlg, IDOK);
-            return TRUE;
-        }
-        case IDCANCEL:
-            keychord::CancelChordCapture();
-            EndDialog(dlg, IDCANCEL);
-            return TRUE;
         case IDC_BTN_CLEAR_MEMORY:
-            if (MessageBoxW(dlg, L"Forget all learned search aliases?", L"Monopane",
+            if (MessageBoxW(page, L"Forget all learned search aliases?", L"Monopane",
                             MB_YESNO | MB_ICONQUESTION) == IDYES) {
                 ClearAliases();
-                EnableWindow(GetDlgItem(dlg, IDC_BTN_CLEAR_MEMORY), FALSE);
-                SetDlgItemTextW(dlg, IDC_BTN_CLEAR_MEMORY, L"Memory cleared");
+                EnableWindow(GetDlgItem(page, IDC_BTN_CLEAR_MEMORY), FALSE);
+                SetDlgItemTextW(page, IDC_BTN_CLEAR_MEMORY, L"Memory cleared");
             }
             return TRUE;
         }
         break;
+    }
+    return FALSE;
+}
+
+// Called by the host on OK, with g_settingsLock held exclusive.
+void CommitSwitcherTab(HWND page)
+{
+    g_settings.activateAllOfApp = IsDlgButtonChecked(page, IDC_CHK_ACTIVATE_ALL) == BST_CHECKED;
+    g_settings.preselectPrevious = IsDlgButtonChecked(page, IDC_CHK_PRESELECT) == BST_CHECKED;
+    g_settings.matchAppName = IsDlgButtonChecked(page, IDC_CHK_MATCH_APP) == BST_CHECKED;
+    if (keychord::ChordValid(g_editHotkey))
+        g_settings.hotkey = g_editHotkey;
+    if (keychord::ChordValid(g_editRotate))
+        g_settings.rotateHotkey = g_editRotate;
+    if (keychord::ChordValid(g_editLaunchpad))
+        g_settings.launchpadHotkey = g_editLaunchpad;
+}
+
+// ------------------------------------------------------------- host dialog
+
+struct HostState {
+    KeysEdit* keys = nullptr;
+    HWND tabSwitcher = nullptr;
+    HWND tabKeys = nullptr;
+    HWND tabOptions = nullptr;
+    // Autostart state when the dialog opened; SetAutoStart runs elevated (UAC
+    // prompt), so it is only called when the checkbox actually changed.
+    bool autoStartAtOpen = false;
+};
+
+HostState* Host(HWND dlg)
+{
+    return reinterpret_cast<HostState*>(GetWindowLongPtrW(dlg, DWLP_USER));
+}
+
+void PositionTabChild(HWND dlg, HWND child)
+{
+    HWND tab = GetDlgItem(dlg, IDC_TAB);
+    RECT rc;
+    GetWindowRect(tab, &rc);
+    MapWindowPoints(nullptr, dlg, reinterpret_cast<POINT*>(&rc), 2);
+    TabCtrl_AdjustRect(tab, FALSE, &rc);
+    SetWindowPos(child, HWND_TOP, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+                 SWP_NOACTIVATE);
+}
+
+void SelectTab(HostState* st, int index)
+{
+    ShowWindow(st->tabSwitcher, index == 0 ? SW_SHOW : SW_HIDE);
+    ShowWindow(st->tabKeys, index == 1 ? SW_SHOW : SW_HIDE);
+    ShowWindow(st->tabOptions, index == 2 ? SW_SHOW : SW_HIDE);
+}
+
+INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    HostState* st = Host(dlg);
+
+    switch (msg) {
+    case WM_INITDIALOG: {
+        st = new HostState();
+        st->keys = BeginKeysEdit();
+        SetWindowLongPtrW(dlg, DWLP_USER, reinterpret_cast<LONG_PTR>(st));
+
+        SendMessageW(dlg, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(
+            LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP))));
+
+        HWND tab = GetDlgItem(dlg, IDC_TAB);
+        TCITEMW item = {};
+        item.mask = TCIF_TEXT;
+        item.pszText = const_cast<wchar_t*>(L"Switcher");
+        TabCtrl_InsertItem(tab, 0, &item);
+        item.pszText = const_cast<wchar_t*>(L"Key setup");
+        TabCtrl_InsertItem(tab, 1, &item);
+        item.pszText = const_cast<wchar_t*>(L"Key options");
+        TabCtrl_InsertItem(tab, 2, &item);
+
+        HINSTANCE instance = reinterpret_cast<HINSTANCE>(
+            GetWindowLongPtrW(dlg, GWLP_HINSTANCE));
+        st->tabSwitcher = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_TAB_SWITCHER), dlg,
+                                             SwitcherTabProc, 0);
+        st->tabKeys = CreateKeysTab(dlg, instance, st->keys);
+        st->tabOptions = CreateKeyOptionsTab(dlg, instance, st->keys);
+        PositionTabChild(dlg, st->tabSwitcher);
+        PositionTabChild(dlg, st->tabKeys);
+        PositionTabChild(dlg, st->tabOptions);
+        SelectTab(st, 0);
+
+        st->autoStartAtOpen = IsAutoStartEnabled();
+        CheckDlgButton(dlg, IDC_CHK_AUTOSTART, st->autoStartAtOpen ? BST_CHECKED : BST_UNCHECKED);
+        return TRUE;
+    }
+
+    case WM_NOTIFY: {
+        const NMHDR* hdr = reinterpret_cast<const NMHDR*>(lParam);
+        if (st && hdr->idFrom == IDC_TAB && hdr->code == TCN_SELCHANGE)
+            SelectTab(st, TabCtrl_GetCurSel(GetDlgItem(dlg, IDC_TAB)));
+        return 0;
+    }
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDC_BTN_CONFIGFOLDER:
+            // Opens what is on disk, which is the saved config — not the edits
+            // still pending in this dialog.
+            OpenConfigFolder();
+            return TRUE;
+
+        case IDOK: {
+            if (!st)
+                return TRUE;
+            keychord::CancelChordCapture();
+            g_capturing = Capturing::None;
+
+            AcquireSRWLockExclusive(&g_settingsLock);
+            CommitSwitcherTab(st->tabSwitcher);
+            ReleaseSRWLockExclusive(&g_settingsLock);
+            SaveSettings();
+
+            CommitKeysEdit(dlg, st->keys);
+
+            const bool autoStart = IsDlgButtonChecked(dlg, IDC_CHK_AUTOSTART) == BST_CHECKED;
+            if (autoStart != st->autoStartAtOpen)
+                SetAutoStart(autoStart);
+            EndDialog(dlg, IDOK);
+            return TRUE;
+        }
+
+        case IDCANCEL:
+            keychord::CancelChordCapture();
+            g_capturing = Capturing::None;
+            EndDialog(dlg, IDCANCEL);
+            return TRUE;
+        }
+        break;
+
+    case WM_DESTROY:
+        // Closing while a capture is armed would leave the hook swallowing
+        // every keystroke with nowhere to deliver it.
+        keychord::CancelChordCapture();
+        g_capturing = Capturing::None;
+        if (st) {
+            EndKeysEdit(st->keys);
+            delete st;
+            SetWindowLongPtrW(dlg, DWLP_USER, 0);
+        }
+        return 0;
     }
     return FALSE;
 }
@@ -223,7 +331,7 @@ void DefaultHotkey(keychord::KeyChord& out)
 {
     out = keychord::KeyChord();
     out.mods[0] = 0x1D;                               // left ctrl...
-    out.modOrigin[0] = keychord::KeyOrigin::Injected; // ...as MacKeys injects it
+    out.modOrigin[0] = keychord::KeyOrigin::Injected; // ...as the key map injects it
     out.modCount = 1;
     out.trigger = 0x0F;                                  // Tab
     out.triggerOrigin = keychord::KeyOrigin::Physical;
@@ -231,9 +339,9 @@ void DefaultHotkey(keychord::KeyChord& out)
 
 void DefaultRotateHotkey(keychord::KeyChord& out)
 {
-    // Origin::Any throughout: under MacKeys the left Ctrl arrives injected and
-    // this reads as Cmd+Alt+R, without it the physical Ctrl+Alt+R does the same
-    // job. Nothing here needs the two told apart.
+    // Origin::Any throughout: with a remapped Ctrl the left Ctrl arrives
+    // injected and this reads as Cmd+Alt+R, without one the physical
+    // Ctrl+Alt+R does the same job. Nothing here needs the two told apart.
     out = keychord::KeyChord();
     out.mods[0] = 0x1D;  // left ctrl
     out.mods[1] = 0x38;  // left alt
@@ -298,7 +406,6 @@ void SaveSettings()
 // Autostart uses a Task Scheduler logon task ("Monopane") rather than the
 // classic Run key: Run-key apps are staggered by a minute or more at logon
 // (and proved unreliable here), while a logon task fires within seconds.
-// Same approach as MacKeys.
 
 bool IsAutoStartEnabled()
 {
@@ -353,5 +460,7 @@ void SetAutoStart(bool enable)
 
 void ShowSettingsDialog(HWND owner, HINSTANCE instance)
 {
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_TAB_CLASSES | ICC_STANDARD_CLASSES };
+    InitCommonControlsEx(&icc);
     DialogBoxW(instance, MAKEINTRESOURCEW(IDD_SETTINGS), owner, SettingsDlgProc);
 }

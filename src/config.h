@@ -22,16 +22,16 @@ struct Config {
 
 extern Config g_config;
 
-// %APPDATA%\MacKeys and the mackeys.ini inside it.
+// %APPDATA%\Monopane and the keys.ini inside it.
 std::wstring ConfigDir();
 std::wstring ConfigPath();
 
-// Loads mackeys.ini, falling back to defaults (and migrating the legacy HKCU
+// Loads keys.ini, falling back to defaults (and migrating the legacy HKCU
 // settings) when it is missing. Always leaves g_config usable.
 void LoadConfig();
 bool SaveConfig();
 
-// Writes the file if needed, then opens Explorer with mackeys.ini selected.
+// Writes the file if needed, then opens Explorer with keys.ini selected.
 void OpenConfigFolder();
 
 // A sensible starting point for a standard Windows-layout board: Caps sends

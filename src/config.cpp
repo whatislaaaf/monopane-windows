@@ -220,12 +220,12 @@ std::wstring ConfigDir()
     wchar_t appdata[MAX_PATH] = {};
     if (GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH) == 0)
         return ModuleDir();
-    return std::wstring(appdata) + L"\\MacKeys";
+    return std::wstring(appdata) + L"\\Monopane";
 }
 
 std::wstring ConfigPath()
 {
-    return ConfigDir() + L"\\mackeys.ini";
+    return ConfigDir() + L"\\keys.ini";
 }
 
 void LoadConfig()
@@ -358,13 +358,13 @@ bool SaveConfig()
     CreateDirectoryW(dir.c_str(), nullptr);
 
     std::string out;
-    out += "# MacKeys configuration\r\n";
+    out += "# Monopane key map\r\n";
     out += "#\r\n";
     out += "# Keys are set-1 scancodes in hex; E0xx is an extended key\r\n";
     out += "# (E01D = right ctrl). Actions: key:<scancode>, layer, winkey,\r\n";
     out += "# ctrl, desktop:prev, desktop:next, none.\r\n";
     out += "#\r\n";
-    out += "# Edited by hand? Restart MacKeys to reload it.\r\n";
+    out += "# Edited by hand? Restart Monopane to reload it.\r\n";
 
     out += "\r\n[options]\r\n";
     out += std::string("layout           = ") +
