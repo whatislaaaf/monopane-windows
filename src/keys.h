@@ -2,10 +2,10 @@
 #include <windows.h>
 #include <stdint.h>
 
-#include "../../external/keychord/keychord.h"
+#include "../external/keychord/keychord.h"
 
-// Key identity, chords and capture are shared with Monopane through the
-// keychord submodule; what stays here is what only MacKeys does with them.
+// Key identity, chords and capture come from keychord (external/keychord); what stays
+// here is what only the key map does with them.
 using keychord::ChordValid;
 using keychord::ChordMatches;
 using keychord::FormatChord;

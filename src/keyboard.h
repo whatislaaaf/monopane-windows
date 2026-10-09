@@ -9,7 +9,7 @@
 // Key naming and chord text come from keychord.
 using keychord::DescribeChord;
 using keychord::KeyName;
-// "Caps Lock -> Backspace" style, ASCII, for the comments in mackeys.ini.
+// "Caps Lock -> Backspace" style, ASCII, for the comments in keys.ini.
 std::string DescribeBindAscii(KeyId id, const Bind& bind);
 // What a bind does, for the picker's status line.
 std::wstring DescribeBind(const Bind& bind);

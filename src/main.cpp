@@ -1,16 +1,15 @@
-// Monopane — a searchable Cmd+Tab window switcher for Windows, with a
-// launchpad of pinned apps on a second hotkey (see launchpad.h).
+// Monopane — a Mac-style key map, a searchable Cmd+Tab window switcher and a
+// launchpad of pinned apps, in one tray app with one keyboard hook.
 //
-// Press left Cmd+Tab (on a Mac keyboard remapped by MacKeys) to open the
-// overlay, type a few letters to fuzzy-filter the open windows, press Enter
-// to activate the selected one. Esc dismisses.
+// The key map (remap.h, once MacKeys) sees every physical key first and
+// decides what it means; the switcher's hotkeys are matched against what
+// comes out of it. Press Cmd+Tab — Cmd being whichever key the map gives the
+// Ctrl (Mac cmd) role — to open the overlay, type a few letters to
+// fuzzy-filter the open windows, press Enter to activate the selected one.
+// Esc dismisses. The launchpad lives on a second hotkey (launchpad.h).
 //
-// The left Cmd key arrives one of two ways, both handled here:
-//   - VK_F23: the kernel Scancode Map remap, when MacKeys is paused or absent
-//   - an injected Left Ctrl carrying MacKeys' dwExtraInfo marker, when MacKeys
-//     is running (it swallows F23 and holds Ctrl for Mac-style copy/paste)
-// Physical Ctrl+Tab is deliberately NOT intercepted, so in-app tab switching
-// keeps working.
+// Double-clicking the tray icon pauses all of it — for a game, say — and the
+// icon turns grey with a pause sign while it is.
 
 #include <windows.h>
 #include <windowsx.h>
@@ -19,27 +18,33 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "aliases.h"
+#include "config.h"
 #include "display.h"
 #include "fuzzy.h"
+#include "keyboard.h"
+#include "keysettings.h"
 #include "launchpad.h"
+#include "lock.h"
 #include "paint.h"
+#include "remap.h"
+#include "scancodemap.h"
 #include "settings.h"
 #include "theme.h"
 #include "window_list.h"
 #include "../res/resource.h"
 
+SRWLOCK g_settingsLock = SRWLOCK_INIT;
+
 namespace {
 
 constexpr wchar_t kOverlayClass[] = L"MonopaneOverlay";
 constexpr wchar_t kMutexName[] = L"MonopaneSingleInstance";
-
-// dwExtraInfo marker MacKeys stamps on the input it injects ("MKYS").
-constexpr ULONG_PTR kMacKeysMarker = 0x4D4B5953;
 
 constexpr UINT WM_APP_HOTKEY = WM_APP + 1;  // wParam: 1 = shift held (cycle up)
 constexpr UINT WM_APP_TRAY = WM_APP + 2;
@@ -50,6 +55,8 @@ constexpr UINT IDC_SEARCH_EDIT = 100;
 constexpr UINT IDM_EXIT = 201;
 constexpr UINT IDM_SETTINGS = 202;
 constexpr UINT IDM_LAUNCHPAD = 203;
+constexpr UINT IDM_PAUSE = 204;
+constexpr UINT IDM_RESETMAP = 205;
 constexpr UINT TRAY_ICON_ID = 1;
 
 // As many rows as will be shown at once, before the list scrolls. A short
@@ -508,19 +515,28 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
         const auto* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
         const bool down = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
         const bool injected = (kb->flags & LLKHF_INJECTED) != 0;
-        const bool fromMacKeys = injected && kb->dwExtraInfo == kMacKeysMarker;
+        const bool fromRemap = injected && kb->dwExtraInfo == remap::kInjectMarker;
 
-        // Input injected by anything else (remote desktop, AutoHotkey) is left
-        // alone entirely, as before.
-        if (!injected || fromMacKeys) {
+        // Stage one: the key map. Every physical key goes through it first;
+        // what it swallows comes back round as injected input carrying its
+        // marker, and that is what the hotkeys below see in its place.
+        if (!injected && remap::HandlePhysicalKey(*kb, down))
+            return 1;
+
+        // Stage two: the hotkeys, matched against what survived the key map
+        // plus what it injected. Input injected by anything else (remote
+        // desktop, AutoHotkey) is left alone entirely.
+        if (!injected || fromRemap) {
             const keychord::KeyId id =
                 keychord::MakeKeyId(kb->scanCode, (kb->flags & LLKHF_EXTENDED) != 0);
-            const keychord::KeyOrigin origin = fromMacKeys ? keychord::KeyOrigin::Injected
-                                                           : keychord::KeyOrigin::Physical;
+            const keychord::KeyOrigin origin = fromRemap ? keychord::KeyOrigin::Injected
+                                                         : keychord::KeyOrigin::Physical;
 
-            // While Settings is capturing a hotkey it takes raw keystrokes
-            // ahead of everything, and swallows them.
-            if (keychord::ChordCaptureActive() && keychord::FeedChordKey(id, down, origin))
+            // While Settings is capturing a hotkey it takes keystrokes ahead
+            // of everything, and swallows them. The key map's own hotkey list
+            // captures ahead of stage one instead, so it is skipped here.
+            if (keychord::ChordCaptureActive() && !KeysChordCaptureArmed() &&
+                keychord::FeedChordKey(id, down, origin))
                 return 1;
 
             const int slot = keychord::KeySlot(id);
@@ -534,13 +550,19 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                     --g_heldCount;
             }
 
+            // Paused, the hotkeys stand down with the key map. The held table
+            // above keeps tracking meanwhile, so nothing is stale when they
+            // come back.
+            if (remap::Paused())
+                return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
+
             // Copies, taken under the lock: this runs on the hook thread while
             // the settings dialog may be replacing them.
-            AcquireSRWLockShared(&g_hotkeyLock);
+            AcquireSRWLockShared(&g_settingsLock);
             const keychord::KeyChord hotkey = g_settings.hotkey;
             const keychord::KeyChord rotate = g_settings.rotateHotkey;
             const keychord::KeyChord launchpad = g_settings.launchpadHotkey;
-            ReleaseSRWLockShared(&g_hotkeyLock);
+            ReleaseSRWLockShared(&g_settingsLock);
 
             if (down && id == hotkey.trigger &&
                 (hotkey.triggerOrigin == keychord::KeyOrigin::Any ||
@@ -610,14 +632,28 @@ DWORD WINAPI HookThreadProc(LPVOID)
     PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
 
     g_keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, g_hInstance, 0);
+    if (g_keyboardHook) {
+        // The key map's tables are only ever touched from this thread, so
+        // they are built here, before the first key can arrive.
+        remap::BindHookThread(GetCurrentThreadId());
+        remap::ReloadConfig();
+    }
     SetEvent(g_hookReady);
     if (!g_keyboardHook)
         return 1;
 
+    // Nothing but the hook and the key map's requests come through here.
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        switch (msg.message) {
+        case remap::WM_REMAP_RELOAD:  remap::ReloadConfig(); break;
+        case remap::WM_REMAP_PAUSE:   remap::SetPaused(msg.wParam != 0); break;
+        case remap::WM_REMAP_RELEASE: remap::ReleaseAll(); break;
+        }
     }
 
     UnhookWindowsHookEx(g_keyboardHook);
+    remap::BindHookThread(0);
+    remap::ReleaseAll();
     return 0;
 }
 
@@ -648,6 +684,89 @@ void StopHookThread()
 }
 
 // ---------------------------------------------------------------------------
+// Pausing
+
+bool g_paused = false;
+HICON g_iconNormal = nullptr;
+HICON g_iconPaused = nullptr;
+
+void UpdateTrayIcon();
+
+// The paused tray icon is the normal one with its blue turned grey and a pause
+// sign drawn over the glyph. Made here rather than shipped as a second .ico so
+// the two can never drift apart.
+HICON MakePausedIcon(HICON base)
+{
+    ICONINFO info{};
+    if (!GetIconInfo(base, &info))
+        return nullptr;
+    BITMAP bm{};
+    GetObjectW(info.hbmColor, sizeof(bm), &bm);
+    const int size = bm.bmWidth;
+
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = size;
+    bi.bmiHeader.biHeight = -size; // top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+
+    std::vector<DWORD> px(static_cast<size_t>(size) * size);
+    HDC dc = CreateCompatibleDC(nullptr);
+    const int rows = GetDIBits(dc, info.hbmColor, 0, size, px.data(), &bi, DIB_RGB_COLORS);
+    DeleteObject(info.hbmColor);
+    DeleteObject(info.hbmMask);
+    if (rows != size || bm.bmHeight != size) {
+        DeleteDC(dc);
+        return nullptr;
+    }
+
+    // Grey keeps the alpha, so the rounded corners stay rounded.
+    for (DWORD& p : px)
+        if (p & 0xFF000000)
+            p = (p & 0xFF000000) | 0x00808080;
+
+    // Two white bars, a sixth of the icon wide each with the same gap between,
+    // half of it tall.
+    const int bar = std::max(2, size * 17 / 100);
+    const int tall = std::max(4, size / 2);
+    const int left = (size - 3 * bar) / 2;
+    const int top = (size - tall) / 2;
+    for (int y = top; y < top + tall; ++y)
+        for (int x = left; x < left + 3 * bar; ++x)
+            if (x < left + bar || x >= left + 2 * bar)
+                px[static_cast<size_t>(y) * size + x] = 0xFFFFFFFF;
+
+    void* bits = nullptr;
+    HBITMAP color = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (color && bits)
+        memcpy(bits, px.data(), px.size() * sizeof(DWORD));
+    // An all-zero mask hands the shape over to the alpha channel.
+    std::vector<BYTE> blank(static_cast<size_t>((size + 15) / 16) * 2 * size, 0);
+    HBITMAP mask = CreateBitmap(size, size, 1, 1, blank.data());
+
+    ICONINFO out{};
+    out.fIcon = TRUE;
+    out.hbmColor = color;
+    out.hbmMask = mask;
+    HICON icon = color && mask ? CreateIconIndirect(&out) : nullptr;
+    if (color)
+        DeleteObject(color);
+    if (mask)
+        DeleteObject(mask);
+    DeleteDC(dc);
+    return icon;
+}
+
+void TogglePause()
+{
+    g_paused = !g_paused;
+    remap::RequestPause(g_paused);
+    UpdateTrayIcon();
+}
+
+// ---------------------------------------------------------------------------
 // Tray icon
 
 // A logon task fires within seconds, which is often *before* Explorer is up,
@@ -671,11 +790,36 @@ void AddTrayIcon(HWND hwnd)
     g_trayIcon.uID = TRAY_ICON_ID;
     g_trayIcon.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     g_trayIcon.uCallbackMessage = WM_APP_TRAY;
-    g_trayIcon.hIcon = static_cast<HICON>(LoadImageW(
-        g_hInstance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON,
-        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0));
-    wcscpy_s(g_trayIcon.szTip, L"Monopane — Cmd+Tab window search");
+    if (!g_iconNormal) {
+        g_iconNormal = static_cast<HICON>(LoadImageW(
+            g_hInstance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0));
+        g_iconPaused = MakePausedIcon(g_iconNormal);
+    }
+    g_trayIcon.hIcon = g_paused && g_iconPaused ? g_iconPaused : g_iconNormal;
+    wcscpy_s(g_trayIcon.szTip, g_paused ? L"Monopane — paused (double-click to resume)"
+                                        : L"Monopane (double-click to pause)");
     Shell_NotifyIconW(NIM_ADD, &g_trayIcon);
+}
+
+void UpdateTrayIcon()
+{
+    if (!g_trayIcon.hWnd)
+        return;
+    g_trayIcon.hIcon = g_paused && g_iconPaused ? g_iconPaused : g_iconNormal;
+    wcscpy_s(g_trayIcon.szTip, g_paused ? L"Monopane — paused (double-click to resume)"
+                                        : L"Monopane (double-click to pause)");
+    Shell_NotifyIconW(NIM_MODIFY, &g_trayIcon);
+}
+
+void ShowBalloon(const wchar_t* title, const wchar_t* text)
+{
+    NOTIFYICONDATAW nid = g_trayIcon;
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = NIIF_INFO;
+    wcscpy_s(nid.szInfoTitle, title);
+    wcscpy_s(nid.szInfo, text);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
 void ShowTrayMenu(HWND hwnd)
@@ -683,6 +827,10 @@ void ShowTrayMenu(HWND hwnd)
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, IDM_LAUNCHPAD, L"Launchpad");
     AppendMenuW(menu, MF_STRING, IDM_SETTINGS, L"Settings…");
+    AppendMenuW(menu, MF_STRING | (g_paused ? MF_CHECKED : 0), IDM_PAUSE,
+                L"Pause the key map and hotkeys");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, IDM_RESETMAP, L"Remove kernel Scancode Map…");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_EXIT, L"Exit");
 
@@ -757,7 +905,7 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (LOWORD(lParam) == WM_RBUTTONUP || LOWORD(lParam) == WM_CONTEXTMENU)
             ShowTrayMenu(hwnd);
         else if (LOWORD(lParam) == WM_LBUTTONDBLCLK)
-            ShowOverlay();
+            TogglePause();
         return 0;
 
     case WM_COMMAND:
@@ -776,7 +924,31 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (LOWORD(wParam) == IDM_SETTINGS) {
             HideOverlay();
             HideLaunchpad();
+            // Anything the key map holds down when the dialog opens would
+            // otherwise stay stuck while the picker eats keystrokes.
+            remap::RequestRelease();
             ShowSettingsDialog(hwnd, g_hInstance);
+            return 0;
+        }
+        if (LOWORD(wParam) == IDM_PAUSE) {
+            TogglePause();
+            return 0;
+        }
+        if (LOWORD(wParam) == IDM_RESETMAP) {
+            if (MessageBoxW(hwnd,
+                            L"Remove the kernel Scancode Map?\n\n"
+                            L"This restores stock behaviour for every key it remapped, "
+                            L"including any the key map relies on. Administrator rights "
+                            L"are required and the change takes effect at the next reboot.",
+                            L"Monopane", MB_YESNO | MB_ICONWARNING) == IDYES) {
+                if (ResetScancodeMap())
+                    MessageBoxW(hwnd, L"Removed. Reboot to take effect.", L"Monopane",
+                                MB_OK | MB_ICONINFORMATION);
+                else
+                    MessageBoxW(hwnd, L"Could not remove it (the elevation prompt was "
+                                      L"declined, or the write failed).",
+                                L"Monopane", MB_OK | MB_ICONERROR);
+            }
             return 0;
         }
         if (LOWORD(wParam) == IDM_EXIT) {
@@ -869,6 +1041,24 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+// The key map used to be MacKeys' own file. The first run after the two apps
+// became one copies it across, so no binding is lost; the old file is left
+// where it was.
+void MigrateKeyMapFile()
+{
+    const std::wstring target = ConfigPath();
+    if (GetFileAttributesW(target.c_str()) != INVALID_FILE_ATTRIBUTES)
+        return;
+    wchar_t appdata[MAX_PATH] = {};
+    if (GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH) == 0)
+        return;
+    const std::wstring old = std::wstring(appdata) + L"\\MacKeys\\mackeys.ini";
+    if (GetFileAttributesW(old.c_str()) == INVALID_FILE_ATTRIBUTES)
+        return;
+    CreateDirectoryW(ConfigDir().c_str(), nullptr);
+    CopyFileW(old.c_str(), target.c_str(), TRUE);
+}
+
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
@@ -879,9 +1069,23 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     if (mutex == nullptr || GetLastError() == ERROR_ALREADY_EXISTS)
         return 0;
 
+    // The key map used to be a separate app. Two of them would remap every
+    // key twice, so an old MacKeys still running is worth a word.
+    if (HANDLE old = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\MacKeysSingleInstance")) {
+        CloseHandle(old);
+        MessageBoxW(nullptr,
+                    L"MacKeys is still running. Its key map now lives in Monopane — "
+                    L"exit MacKeys and remove its autostart task, or every key will be "
+                    L"remapped twice.",
+                    L"Monopane", MB_OK | MB_ICONWARNING);
+    }
+
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     LoadSettings();
     LoadAliases();
+    MigrateKeyMapFile();
+    LoadConfig();
+    RegisterKeyboardControl(hInstance);
 
     INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES };
     InitCommonControlsEx(&icc);
@@ -930,6 +1134,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
         return 1;
     }
 
+    // A config needing a kernel remap that isn't installed yet works in every
+    // respect except Win+L, which is worth saying out loud rather than leaving
+    // the user to discover by locking their PC. A map left over from an
+    // earlier setup is worth a word too.
+    {
+        const ScancodeMapPlan plan = BuildScancodeMap(g_config);
+        if (!ScancodeMapIsCurrent(plan))
+            ShowBalloon(L"Monopane",
+                        plan.blob.empty()
+                            ? L"A kernel Scancode Map from an earlier key setup is still "
+                              L"installed. Settings → Key options can remove it."
+                            : L"Your key setup needs a kernel remap that isn't installed "
+                              L"yet. Open Settings and click OK to write it.");
+    }
+
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);
@@ -937,6 +1156,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     }
 
     StopHookThread();
+    if (g_iconPaused)
+        DestroyIcon(g_iconPaused);
     ClearIconCache();
     DestroyLaunchpadResources();
     if (g_fontApp) DeleteObject(g_fontApp);
