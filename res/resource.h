@@ -22,8 +22,6 @@
 #define IDC_TXT_HOTKEY_HINT     326
 #define IDC_TXT_ROTATE          327
 #define IDC_BTN_ROTATE          328
-#define IDC_TXT_LAUNCHPAD       329
-#define IDC_BTN_LAUNCHPAD       330
 
 // Key setup tab
 #define IDC_RAD_BASE            340
@@ -41,8 +39,3 @@
 #define IDC_BTN_RESETDEFAULTS   356
 #define IDC_TXT_SCMAP           357
 #define IDC_BTN_SCMAP_RESET     358
-
-// The launchpad's "add an installed app" picker
-#define IDD_PICKER              360
-#define IDC_PICK_SEARCH         361
-#define IDC_PICK_LIST           362

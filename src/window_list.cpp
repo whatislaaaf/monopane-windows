@@ -1,8 +1,6 @@
 #include "window_list.h"
 
-#include <initguid.h>  // ahead of propkey.h, so PKEY_AppUserModel_ID is defined here
 #include <dwmapi.h>
-#include <propkey.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <unordered_map>
@@ -83,28 +81,11 @@ const AppInfo& GetAppInfo(const std::wstring& exePath)
             info.icon = sfi.hIcon;
     }
 
-    info.name = ExeDisplayName(exePath);
+    info.name = FileDescription(exePath);
+    if (info.name.empty())
+        info.name = ExeStem(exePath);
 
     return g_appCache.emplace(exePath, std::move(info)).first->second;
-}
-
-// The AppUserModelID a window carries, which is how the taskbar groups it.
-// Windows of Store apps are hosted by ApplicationFrameHost, so this is the
-// only thing that says which app one belongs to.
-std::wstring WindowAumid(HWND hwnd)
-{
-    std::wstring out;
-    IPropertyStore* store = nullptr;
-    if (FAILED(SHGetPropertyStoreForWindow(hwnd, IID_PPV_ARGS(&store))))
-        return out;
-    PROPVARIANT value;
-    PropVariantInit(&value);
-    if (SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &value)) && value.vt == VT_LPWSTR &&
-        value.pwszVal)
-        out = value.pwszVal;
-    PropVariantClear(&value);
-    store->Release();
-    return out;
 }
 
 bool IsCloaked(HWND hwnd)
@@ -182,7 +163,6 @@ BOOL CALLBACK EnumProc(HWND hwnd, LPARAM lParam)
     WindowInfo info;
     info.hwnd = hwnd;
     info.title = title;
-    info.aumid = WindowAumid(hwnd);
     if (!exePath.empty()) {
         const AppInfo& app = GetAppInfo(exePath);
         info.appName = app.name;
@@ -195,12 +175,6 @@ BOOL CALLBACK EnumProc(HWND hwnd, LPARAM lParam)
 }
 
 } // namespace
-
-std::wstring ExeDisplayName(const std::wstring& exePath)
-{
-    std::wstring name = FileDescription(exePath);
-    return name.empty() ? ExeStem(exePath) : name;
-}
 
 void SetIconSizePx(int px)
 {

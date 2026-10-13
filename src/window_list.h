@@ -8,13 +8,8 @@ struct WindowInfo {
     std::wstring title;
     std::wstring appName;   // friendly app name (FileDescription or exe stem)
     std::wstring exePath;   // full path of the owning process's executable
-    std::wstring aumid;     // the AppUserModelID the window declares, if any
     HICON icon = nullptr;   // owned by the icon cache, do not destroy
 };
-
-// The friendly name of an executable: its FileDescription, else its file
-// name without the extension.
-std::wstring ExeDisplayName(const std::wstring& exePath);
 
 // Sets the pixel size icons are extracted at (call before enumerating, and
 // again on DPI changes). Extracting at the exact size the UI draws avoids

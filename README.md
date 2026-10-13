@@ -1,6 +1,6 @@
 # Monopane
 
-Three things a Mac keyboard habit wants on Windows, in one tray app with one
+Two things a Mac keyboard habit wants on Windows, in one tray app with one
 keyboard hook:
 
 - **A Mac-style key map** — Caps Lock as Backspace, a nav layer under a thumb
@@ -9,9 +9,6 @@ keyboard hook:
 - **A searchable Cmd+Tab switcher** — press the hotkey, type a few letters of
   a window's name, press Enter. Inspired by the *Search in Context* feature of
   the [Context](https://contexts.co) app on macOS.
-- **A launchpad** — Ctrl+Space opens a grid of the apps you have pinned, with
-  a pencil to rearrange them: a Start menu whose pinned area is as big as you
-  want it.
 
 And for games: **double-click the tray icon** and all of it pauses — the icon
 turns grey with a pause sign — so the keyboard in there is exactly what the
@@ -57,13 +54,13 @@ Nav layer (hold the layer key):
 | `o` | Ctrl+Win+Right — next virtual desktop |
 
 Chords that span several keys live in the Hotkeys list on the **Key options**
-tab rather than on the keyboard picture. None are bound out of the box:
-**Left Ctrl + Space**, the Spotlight position, belongs to the launchpad. The
+tab rather than on the keyboard picture. One is bound out of the box:
+**Left Ctrl + Space**, the Spotlight position, opens the Start menu. The
 actions on offer there:
 
 | Action | Does |
 | --- | --- |
-| Open the Start menu | Taps the Win key (costs whatever chord you put it on, e.g. the raw Ctrl+Space used by IDE autocomplete) |
+| Open the Start menu | Taps the Win key (costs whatever chord you put it on — by default the raw Ctrl+Space used by IDE autocomplete) |
 | Switch input language | Sends Win+Space |
 | Send another chord | Rewrites one chord as another |
 
@@ -154,9 +151,9 @@ E038 = layer              # Right Alt -> nav layer
 16 = desktop:prev         # U -> prev desktop
 
 [chords]
+start_menu     = 1D+39           # Left Ctrl + Space
 input_language = 38+39           # Left Alt + Space
 send           = 38+10 > E038+3E # Left Alt + Q sends Right Alt + F4
-start_menu     = E01D+39         # Right Ctrl + Space
 ```
 
 Keys are set-1 scancodes in hex, with `E0` prefixing extended keys. Actions are
@@ -225,7 +222,7 @@ exists:
 
 ### The hotkeys
 
-There are three, all captured the same way: **Settings → Switcher → Set…**,
+There are two, both captured the same way: **Settings → Switcher → Set…**,
 then hold the modifiers and press the trigger key and let go. The trigger is
 whichever key you pressed last. Esc cancels, and the capture releases itself
 after 15 seconds, so it can never leave the keyboard swallowed.
@@ -272,43 +269,6 @@ reboot, exactly as the Settings app's own dropdown does.
 `AltGr+R` is safe: AltGr arrives as *right* Alt, and the chord is bound to the
 left one by scancode.
 
-#### Opening the launchpad
-
-**Left Ctrl+Space** by default, taken however the keys arrive, and tolerant of
-extra modifiers like the other two. Capture it by pressing the key you think of
-as Ctrl: if that key is remapped, the chord records whatever the key map turns
-it into, and works all the same.
-
-## The launchpad
-
-A panel on the monitor with the cursor: a search box, a pencil, and a
-six-wide grid of icons. It is the same width as the switcher and puts its
-search box on exactly the same line — the middle of the screen — so the two
-do not jump around each other as you flip between them. Type to filter it,
-arrows move the highlight, **Enter** or a click opens the app, **Esc** closes.
-Opening an app that already has a window brings that window forward;
-**Shift+Enter** or Shift+click starts a fresh instance regardless. Search
-memory works here too.
-
-The **pencil** (top right) switches to edit mode:
-
-- **Drag** a tile to move it; the others shuffle out of the way
-- The **✕** on a tile removes it (or select it and press **Delete**)
-- Click a tile's **name** to rename it (or **F2**); Enter commits, Esc reverts,
-  and typing the app's own name back clears the custom one
-- The **+** tile adds an app: *Installed app…* lists everything the Start menu
-  knows about, Store apps included, with a search box; *Browse for a file…*
-  takes any `.exe` or `.lnk`
-
-The pencil again, or Esc, leaves edit mode.
-
-The first time it opens, the grid is seeded with whatever is pinned to your
-Start menu, in the same order. After that it is entirely yours: the list lives
-in `%APPDATA%\Monopane\launchpad.ini`, next to `keys.ini`, one app per line in
-grid order, either a path or `app:<AppUserModelID>`, with an optional `| name`
-after it. Edit it by hand if you like; the launchpad rereads it the next time
-it opens.
-
 ## Usage
 
 | Key | Action |
@@ -320,15 +280,11 @@ it opens.
 | `Enter` | Activate the selected window |
 | `Esc` | Dismiss without switching |
 | `Ctrl+Alt+R` (default) | Rotate the monitor under the cursor one step |
-| `Ctrl+Space` (default) | Open the launchpad (again to close it) |
-| in the launchpad: `←` `→` `↑` `↓` | Move the highlight |
-| in the launchpad: `Enter` / click | Open the app, or bring its window forward |
-| in the launchpad: `Shift+Enter` / Shift+click | Start a fresh instance |
-| in edit mode: `Delete` / `F2` | Remove / rename the highlighted tile |
+| Left `Ctrl+Space` (default) | Open the Start menu |
 
 Monopane lives in the system tray. Right-click the tray icon for
-**Launchpad**, **Settings…**, **Pause the key map and hotkeys**, **Remove
-kernel Scancode Map…** and **Exit**; double-click it to pause and resume.
+**Settings…**, **Pause the key map and hotkeys**, **Remove kernel Scancode
+Map…** and **Exit**; double-click it to pause and resume.
 
 Settings has three tabs — **Switcher**, **Key setup** and **Key options** —
 and, underneath them, **Start with Windows**.
@@ -394,7 +350,7 @@ desk through a KVM. Copy it to `~/.config/karabiner/karabiner.json`.
 | Right Alt | nav layer | nav layer |
 | Menu | Windows key | left alone — macOS has no counterpart |
 | Right Ctrl | Right Ctrl | Right Control |
-| leftmost + Space | the launchpad | **Spotlight** |
+| leftmost + Space | Start menu | **Spotlight** |
 | command key + Space | switch input language | **switch input source** |
 
 Nav layer `u` / `o` switch virtual desktops on Windows and Spaces on macOS
