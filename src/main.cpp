@@ -1,12 +1,12 @@
-// Monopane — a Mac-style key map, a searchable Cmd+Tab window switcher and a
-// launchpad of pinned apps, in one tray app with one keyboard hook.
+// Monopane — a Mac-style key map and a searchable Cmd+Tab window switcher, in
+// one tray app with one keyboard hook.
 //
 // The key map (remap.h, once MacKeys) sees every physical key first and
 // decides what it means; the switcher's hotkeys are matched against what
 // comes out of it. Press Cmd+Tab — Cmd being whichever key the map gives the
 // Ctrl (Mac cmd) role — to open the overlay, type a few letters to
 // fuzzy-filter the open windows, press Enter to activate the selected one.
-// Esc dismisses. The launchpad lives on a second hotkey (launchpad.h).
+// Esc dismisses.
 //
 // Double-clicking the tray icon pauses all of it — for a game, say — and the
 // icon turns grey with a pause sign while it is.
@@ -29,7 +29,6 @@
 #include "fuzzy.h"
 #include "keyboard.h"
 #include "keysettings.h"
-#include "launchpad.h"
 #include "lock.h"
 #include "paint.h"
 #include "remap.h"
@@ -49,12 +48,10 @@ constexpr wchar_t kMutexName[] = L"MonopaneSingleInstance";
 constexpr UINT WM_APP_HOTKEY = WM_APP + 1;  // wParam: 1 = shift held (cycle up)
 constexpr UINT WM_APP_TRAY = WM_APP + 2;
 constexpr UINT WM_APP_ROTATE = WM_APP + 3;
-constexpr UINT WM_APP_LAUNCHPAD = WM_APP + 4;
 
 constexpr UINT IDC_SEARCH_EDIT = 100;
 constexpr UINT IDM_EXIT = 201;
 constexpr UINT IDM_SETTINGS = 202;
-constexpr UINT IDM_LAUNCHPAD = 203;
 constexpr UINT IDM_PAUSE = 204;
 constexpr UINT IDM_RESETMAP = 205;
 constexpr UINT TRAY_ICON_ID = 1;
@@ -64,8 +61,8 @@ constexpr UINT TRAY_ICON_ID = 1;
 constexpr int MAX_VISIBLE_ROWS = 10;
 int g_visibleRows = MAX_VISIBLE_ROWS;
 
-// Base (96-dpi) metrics. The width, the search box and the padding are shared
-// with the launchpad; see theme.h.
+// Base (96-dpi) metrics. The width, the search box and the padding are in
+// theme.h.
 constexpr int BASE_ROW_H = 44;
 constexpr int BASE_ICON = 24;
 
@@ -241,10 +238,9 @@ void LayoutOverlay(bool reposition)
     MONITORINFO mi{ sizeof(mi) };
     GetMonitorInfoW(monitor, &mi);
 
-    // The search box sits on the middle of the work area, the same line the
-    // launchpad puts its own on, and the list hangs below it. The top is fixed
-    // whatever the list is doing, so nothing creeps up the screen as a search
-    // narrows it, and nothing jumps when the launchpad opens instead.
+    // The search box sits on the middle of the work area and the list hangs
+    // below it. The top is fixed whatever the list is doing, so nothing creeps
+    // up the screen as a search narrows it.
     const int top = PanelTop(mi.rcWork, SearchPlateRect());
     g_visibleRows = std::min(RowsThatFit(mi.rcWork, top, searchH, pad, rowH), MAX_VISIBLE_ROWS);
 
@@ -561,7 +557,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
             AcquireSRWLockShared(&g_settingsLock);
             const keychord::KeyChord hotkey = g_settings.hotkey;
             const keychord::KeyChord rotate = g_settings.rotateHotkey;
-            const keychord::KeyChord launchpad = g_settings.launchpadHotkey;
             ReleaseSRWLockShared(&g_settingsLock);
 
             if (down && id == hotkey.trigger &&
@@ -586,19 +581,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
                 PruneStaleHeld();
                 if (keychord::ChordMatches(rotate, g_held, g_heldCount, /*exact=*/false)) {
                     PostMessageW(g_hwndOverlay, WM_APP_ROTATE, 0, 0);
-                    return 1;
-                }
-            }
-
-            // Loose like the others: under MacKeys the physical key behind
-            // the chord's modifier may still be seen down alongside the one
-            // MacKeys injects for it, and an exact match would refuse that.
-            if (down && keychord::ChordValid(launchpad) && id == launchpad.trigger &&
-                (launchpad.triggerOrigin == keychord::KeyOrigin::Any ||
-                 launchpad.triggerOrigin == origin)) {
-                PruneStaleHeld();
-                if (keychord::ChordMatches(launchpad, g_held, g_heldCount, /*exact=*/false)) {
-                    PostMessageW(g_hwndOverlay, WM_APP_LAUNCHPAD, 0, 0);
                     return 1;
                 }
             }
@@ -825,7 +807,6 @@ void ShowBalloon(const wchar_t* title, const wchar_t* text)
 void ShowTrayMenu(HWND hwnd)
 {
     HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING, IDM_LAUNCHPAD, L"Launchpad");
     AppendMenuW(menu, MF_STRING, IDM_SETTINGS, L"Settings…");
     AppendMenuW(menu, MF_STRING | (g_paused ? MF_CHECKED : 0), IDM_PAUSE,
                 L"Pause the key map and hotkeys");
@@ -877,27 +858,16 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_APP_HOTKEY:
-        if (LaunchpadVisible())
-            HideLaunchpad();
         if (!g_overlayVisible)
             ShowOverlay();
         else
             MoveSelection(wParam ? -1 : 1);
         return 0;
 
-    case WM_APP_LAUNCHPAD:
-        HideOverlay();
-        if (LaunchpadVisible())
-            HideLaunchpad();
-        else
-            ShowLaunchpad();
-        return 0;
-
     case WM_APP_ROTATE:
         // The switcher is sized to the monitor it opens on, so a rotation
         // underneath it would leave it stale; it reopens re-laid-out.
         HideOverlay();
-        HideLaunchpad();
         CycleOrientation();
         return 0;
 
@@ -916,14 +886,8 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             return 0;
         }
-        if (LOWORD(wParam) == IDM_LAUNCHPAD) {
-            HideOverlay();
-            ShowLaunchpad();
-            return 0;
-        }
         if (LOWORD(wParam) == IDM_SETTINGS) {
             HideOverlay();
-            HideLaunchpad();
             // Anything the key map holds down when the dialog opens would
             // otherwise stay stuck while the picker eats keystrokes.
             remap::RequestRelease();
@@ -1087,7 +1051,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     LoadConfig();
     RegisterKeyboardControl(hInstance);
 
-    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES };
+    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES };
     InitCommonControlsEx(&icc);
 
     WNDCLASSEXW wc{ sizeof(wc) };
@@ -1110,11 +1074,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     DWORD cornerPref = 2;  // DWMWCP_ROUND
     DwmSetWindowAttribute(hwnd, 33 /*DWMWA_WINDOW_CORNER_PREFERENCE*/,
                           &cornerPref, sizeof(cornerPref));
-
-    if (!CreateLaunchpadWindow(hInstance)) {
-        DestroyWindow(hwnd);
-        return 1;
-    }
 
     g_taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
 
@@ -1159,7 +1118,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     if (g_iconPaused)
         DestroyIcon(g_iconPaused);
     ClearIconCache();
-    DestroyLaunchpadResources();
     if (g_fontApp) DeleteObject(g_fontApp);
     if (g_fontTitle) DeleteObject(g_fontTitle);
     if (g_fontEdit) DeleteObject(g_fontEdit);

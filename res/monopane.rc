@@ -24,33 +24,30 @@ IDD_TAB_SWITCHER DIALOGEX 0, 0, 400, 244
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Hotkeys", -1, 8, 6, 384, 94
+    GROUPBOX        "Hotkeys", -1, 8, 6, 384, 75
     LTEXT           "Open the switcher", -1, 16, 22, 72, 8
     LTEXT           "", IDC_TXT_HOTKEY, 92, 21, 226, 12
     PUSHBUTTON      "Set...", IDC_BTN_HOTKEY, 326, 19, 54, 14
     LTEXT           "Rotate the display", -1, 16, 41, 72, 8
     LTEXT           "", IDC_TXT_ROTATE, 92, 40, 226, 12
     PUSHBUTTON      "Set...", IDC_BTN_ROTATE, 326, 38, 54, 14
-    LTEXT           "Open the launchpad", -1, 16, 60, 72, 8
-    LTEXT           "", IDC_TXT_LAUNCHPAD, 92, 59, 226, 12
-    PUSHBUTTON      "Set...", IDC_BTN_LAUNCHPAD, 326, 57, 54, 14
-    LTEXT           "", IDC_TXT_HOTKEY_HINT, 16, 77, 364, 20
+    LTEXT           "", IDC_TXT_HOTKEY_HINT, 16, 58, 364, 20
 
-    GROUPBOX        "When activating a window", -1, 8, 106, 384, 42
+    GROUPBOX        "When activating a window", -1, 8, 87, 384, 42
     CONTROL         "Bring all windows of the same app forward", IDC_CHK_ACTIVATE_ALL,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 120, 360, 10
-    LTEXT           "Off: only the selected window is activated.", -1, 27, 133, 350, 8
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 101, 360, 10
+    LTEXT           "Off: only the selected window is activated.", -1, 27, 114, 350, 8
 
-    GROUPBOX        "Switcher", -1, 8, 154, 384, 42
+    GROUPBOX        "Switcher", -1, 8, 135, 384, 42
     CONTROL         "Preselect the previously active window", IDC_CHK_PRESELECT,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 168, 360, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 149, 360, 10
     CONTROL         "Match app names when searching, not just titles", IDC_CHK_MATCH_APP,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 182, 360, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 163, 360, 10
 
-    GROUPBOX        "Search memory", -1, 8, 202, 384, 36
+    GROUPBOX        "Search memory", -1, 8, 183, 384, 36
     LTEXT           "Monopane remembers which app you pick for each search.",
-                    -1, 16, 215, 260, 8
-    PUSHBUTTON      "Clear search memory", IDC_BTN_CLEAR_MEMORY, 290, 212, 90, 14
+                    -1, 16, 196, 260, 8
+    PUSHBUTTON      "Clear search memory", IDC_BTN_CLEAR_MEMORY, 290, 193, 90, 14
 END
 
 IDD_TAB_KEYS DIALOGEX 0, 0, 400, 244
@@ -91,19 +88,6 @@ BEGIN
     GROUPBOX        "Kernel Scancode Map", -1, 8, 164, 384, 62
     LTEXT           "", IDC_TXT_SCMAP, 16, 178, 300, 42
     PUSHBUTTON      "Remove", IDC_BTN_SCMAP_RESET, 320, 178, 60, 14
-END
-
-IDD_PICKER DIALOGEX 0, 0, 300, 262
-STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Add to the launchpad"
-FONT 9, "Segoe UI", 400, 0, 0x1
-BEGIN
-    EDITTEXT        IDC_PICK_SEARCH, 8, 8, 284, 14, ES_AUTOHSCROLL
-    CONTROL         "", IDC_PICK_LIST, "SysListView32",
-                    LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER |
-                    WS_BORDER | WS_TABSTOP, 8, 26, 284, 208
-    DEFPUSHBUTTON   "Add", IDOK, 188, 240, 50, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 242, 240, 50, 14
 END
 
 VS_VERSION_INFO VERSIONINFO

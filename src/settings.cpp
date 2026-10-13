@@ -67,10 +67,9 @@ void WriteAscii(HKEY key, const wchar_t* name, const std::string& value)
 // The tab edits these copies; g_settings only changes on OK.
 keychord::KeyChord g_editHotkey;
 keychord::KeyChord g_editRotate;
-keychord::KeyChord g_editLaunchpad;
 
 // Which of the chords the running capture is for, if any.
-enum class Capturing { None, Hotkey, Rotate, Launchpad };
+enum class Capturing { None, Hotkey, Rotate };
 Capturing g_capturing = Capturing::None;
 
 void ShowHotkeys(HWND page)
@@ -84,13 +83,8 @@ void ShowHotkeys(HWND page)
                     g_capturing == Capturing::Rotate
                         ? L"Press it now…"
                         : keychord::DescribeChord(g_editRotate).c_str());
-    SetDlgItemTextW(page, IDC_TXT_LAUNCHPAD,
-                    g_capturing == Capturing::Launchpad
-                        ? L"Press it now…"
-                        : keychord::DescribeChord(g_editLaunchpad).c_str());
     EnableWindow(GetDlgItem(page, IDC_BTN_HOTKEY), !busy);
     EnableWindow(GetDlgItem(page, IDC_BTN_ROTATE), !busy);
-    EnableWindow(GetDlgItem(page, IDC_BTN_LAUNCHPAD), !busy);
     SetDlgItemTextW(page, IDC_TXT_HOTKEY_HINT,
                     busy
                         ? L"Hold the modifiers and press the trigger key, then let go."
@@ -110,15 +104,12 @@ INT_PTR CALLBACK SwitcherTabProc(HWND page, UINT msg, WPARAM wParam, LPARAM)
         g_capturing = Capturing::None;
         g_editHotkey = g_settings.hotkey;
         g_editRotate = g_settings.rotateHotkey;
-        g_editLaunchpad = g_settings.launchpadHotkey;
         ShowHotkeys(page);
         return TRUE;
 
     case keychord::WM_CHORD_CAPTURED:
         if (g_capturing == Capturing::Rotate)
             g_editRotate = keychord::CapturedChord();
-        else if (g_capturing == Capturing::Launchpad)
-            g_editLaunchpad = keychord::CapturedChord();
         else if (g_capturing == Capturing::Hotkey)
             g_editHotkey = keychord::CapturedChord();
         g_capturing = Capturing::None;
@@ -159,12 +150,6 @@ INT_PTR CALLBACK SwitcherTabProc(HWND page, UINT msg, WPARAM wParam, LPARAM)
             ShowHotkeys(page);
             return TRUE;
 
-        case IDC_BTN_LAUNCHPAD:
-            if (keychord::BeginChordCapture(page))
-                g_capturing = Capturing::Launchpad;
-            ShowHotkeys(page);
-            return TRUE;
-
         case IDC_BTN_CLEAR_MEMORY:
             if (MessageBoxW(page, L"Forget all learned search aliases?", L"Monopane",
                             MB_YESNO | MB_ICONQUESTION) == IDYES) {
@@ -189,8 +174,6 @@ void CommitSwitcherTab(HWND page)
         g_settings.hotkey = g_editHotkey;
     if (keychord::ChordValid(g_editRotate))
         g_settings.rotateHotkey = g_editRotate;
-    if (keychord::ChordValid(g_editLaunchpad))
-        g_settings.launchpadHotkey = g_editLaunchpad;
 }
 
 // ------------------------------------------------------------- host dialog
@@ -349,19 +332,10 @@ void DefaultRotateHotkey(keychord::KeyChord& out)
     out.trigger = 0x13;  // R
 }
 
-void DefaultLaunchpadHotkey(keychord::KeyChord& out)
-{
-    out = keychord::KeyChord();
-    out.mods[0] = 0x1D;  // left ctrl
-    out.modCount = 1;
-    out.trigger = 0x39;  // space
-}
-
 void LoadSettings()
 {
     DefaultHotkey(g_settings.hotkey);
     DefaultRotateHotkey(g_settings.rotateHotkey);
-    DefaultLaunchpadHotkey(g_settings.launchpadHotkey);
 
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
@@ -381,10 +355,6 @@ void LoadSettings()
     if (!storedRotate.empty() && keychord::ParseChord(storedRotate, parsed))
         g_settings.rotateHotkey = parsed;
 
-    const std::string storedLaunchpad = ReadAscii(key, L"LaunchpadHotkey");
-    if (!storedLaunchpad.empty() && keychord::ParseChord(storedLaunchpad, parsed))
-        g_settings.launchpadHotkey = parsed;
-
     RegCloseKey(key);
 }
 
@@ -399,7 +369,6 @@ void SaveSettings()
     WriteBool(key, L"MatchAppName", g_settings.matchAppName);
     WriteAscii(key, L"Hotkey", keychord::FormatChord(g_settings.hotkey));
     WriteAscii(key, L"RotateHotkey", keychord::FormatChord(g_settings.rotateHotkey));
-    WriteAscii(key, L"LaunchpadHotkey", keychord::FormatChord(g_settings.launchpadHotkey));
     RegCloseKey(key);
 }
 
