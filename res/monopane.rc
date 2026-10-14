@@ -11,8 +11,6 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMEN
 CAPTION "Monopane settings"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    CONTROL         "", IDC_TAB, "SysTabControl32", TCS_TABS | WS_TABSTOP,
-                    6, 6, 408, 262
     CONTROL         "Start with Windows", IDC_CHK_AUTOSTART,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 10, 274, 200, 10
     PUSHBUTTON      "Open config folder", IDC_BTN_CONFIGFOLDER, 6, 288, 90, 14
@@ -73,7 +71,7 @@ FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     GROUPBOX        "Hotkeys on the key map", -1, 8, 6, 384, 106
     LISTBOX         IDC_LST_CHORDS, 16, 20, 288, 66,
-                    LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+                    LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "Add...", IDC_BTN_CHORD_ADD, 310, 20, 70, 14
     PUSHBUTTON      "Set keys...", IDC_BTN_CHORD_SET, 310, 38, 70, 14
     PUSHBUTTON      "Remove", IDC_BTN_CHORD_DEL, 310, 56, 70, 14

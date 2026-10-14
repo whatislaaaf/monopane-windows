@@ -1,11 +1,13 @@
 #include "settings.h"
 
 #include <commctrl.h>
+#include <windowsx.h>
 
 #include <string>
 
 #include "aliases.h"
 #include "config.h"
+#include "darkui.h"
 #include "keysettings.h"
 #include "lock.h"
 #include "../res/resource.h"
@@ -94,10 +96,15 @@ void ShowHotkeys(HWND page)
                           L"the cursor: landscape → portrait → portrait (flipped).");
 }
 
-INT_PTR CALLBACK SwitcherTabProc(HWND page, UINT msg, WPARAM wParam, LPARAM)
+INT_PTR CALLBACK SwitcherTabProc(HWND page, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    INT_PTR darkResult = 0;
+    if (dark::Handle(page, msg, wParam, lParam, darkResult))
+        return darkResult;
+
     switch (msg) {
     case WM_INITDIALOG:
+        dark::Apply(page);
         CheckDlgButton(page, IDC_CHK_ACTIVATE_ALL, g_settings.activateAllOfApp ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(page, IDC_CHK_PRESELECT, g_settings.preselectPrevious ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(page, IDC_CHK_MATCH_APP, g_settings.matchAppName ? BST_CHECKED : BST_UNCHECKED);
@@ -178,11 +185,13 @@ void CommitSwitcherTab(HWND page)
 
 // ------------------------------------------------------------- host dialog
 
+constexpr int kTabCount = 3;
+const wchar_t* const kTabNames[kTabCount] = { L"Switcher", L"Key setup", L"Key options" };
+
 struct HostState {
     KeysEdit* keys = nullptr;
-    HWND tabSwitcher = nullptr;
-    HWND tabKeys = nullptr;
-    HWND tabOptions = nullptr;
+    HWND tabs[kTabCount] = {};
+    int selected = 0;
     // Autostart state when the dialog opened; SetAutoStart runs elevated (UAC
     // prompt), so it is only called when the checkbox actually changed.
     bool autoStartAtOpen = false;
@@ -193,68 +202,132 @@ HostState* Host(HWND dlg)
     return reinterpret_cast<HostState*>(GetWindowLongPtrW(dlg, DWLP_USER));
 }
 
-void PositionTabChild(HWND dlg, HWND child)
+// The tab strip is painted by the dialog itself rather than being a tab
+// control: SysTabControl32 only comes in light, and a row of names with an
+// accent line under the current one is all that is wanted of it anyway.
+// Everything below is in dialog units until MapDialogRect.
+constexpr int kStripBottomDu = 28;
+constexpr int kTabPadDu = 10;
+
+RECT PageRectPx(HWND dlg)
 {
-    HWND tab = GetDlgItem(dlg, IDC_TAB);
-    RECT rc;
-    GetWindowRect(tab, &rc);
-    MapWindowPoints(nullptr, dlg, reinterpret_cast<POINT*>(&rc), 2);
-    TabCtrl_AdjustRect(tab, FALSE, &rc);
-    SetWindowPos(child, HWND_TOP, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
-                 SWP_NOACTIVATE);
+    RECT rc{ 6, kStripBottomDu + 2, 414, 270 };
+    MapDialogRect(dlg, &rc);
+    return rc;
 }
 
-void SelectTab(HostState* st, int index)
+// The strip's tab rectangles, in pixels, measured from the names.
+void TabRectsPx(HWND dlg, RECT out[kTabCount])
 {
-    ShowWindow(st->tabSwitcher, index == 0 ? SW_SHOW : SW_HIDE);
-    ShowWindow(st->tabKeys, index == 1 ? SW_SHOW : SW_HIDE);
-    ShowWindow(st->tabOptions, index == 2 ? SW_SHOW : SW_HIDE);
+    RECT strip{ kTabPadDu, 0, 0, kStripBottomDu };
+    MapDialogRect(dlg, &strip);
+    RECT pad{ 0, 0, kTabPadDu, 0 };
+    MapDialogRect(dlg, &pad);
+
+    HDC dc = GetDC(dlg);
+    HGDIOBJ old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(dlg, WM_GETFONT, 0, 0)));
+    int x = strip.left;
+    for (int i = 0; i < kTabCount; ++i) {
+        SIZE sz{};
+        GetTextExtentPoint32W(dc, kTabNames[i], lstrlenW(kTabNames[i]), &sz);
+        out[i] = RECT{ x, 0, x + sz.cx + 2 * pad.right, strip.bottom };
+        x = out[i].right;
+    }
+    SelectObject(dc, old);
+    ReleaseDC(dlg, dc);
+}
+
+void PaintTabStrip(HWND dlg, HostState* st)
+{
+    PAINTSTRUCT ps;
+    HDC dc = BeginPaint(dlg, &ps);
+    RECT tabs[kTabCount];
+    TabRectsPx(dlg, tabs);
+
+    HGDIOBJ old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(dlg, WM_GETFONT, 0, 0)));
+    SetBkMode(dc, TRANSPARENT);
+    const int underline = dark::Px(dlg, 2);
+    for (int i = 0; i < kTabCount; ++i) {
+        const bool current = st && i == st->selected;
+        SetTextColor(dc, current ? dark::kText : dark::kDim);
+        DrawTextW(dc, kTabNames[i], -1, &tabs[i], DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (current) {
+            RECT line{ tabs[i].left, tabs[i].bottom - underline, tabs[i].right, tabs[i].bottom };
+            HBRUSH accent = CreateSolidBrush(dark::kAccent);
+            FillRect(dc, &line, accent);
+            DeleteObject(accent);
+        }
+    }
+    // A hairline under the whole strip, which the accent sits on.
+    RECT client;
+    GetClientRect(dlg, &client);
+    RECT rule{ tabs[0].left, tabs[0].bottom, client.right - tabs[0].left, tabs[0].bottom + 1 };
+    HBRUSH line = CreateSolidBrush(dark::kLine);
+    FillRect(dc, &rule, line);
+    DeleteObject(line);
+    SelectObject(dc, old);
+    EndPaint(dlg, &ps);
+}
+
+void SelectTab(HWND dlg, HostState* st, int index)
+{
+    st->selected = index;
+    for (int i = 0; i < kTabCount; ++i)
+        ShowWindow(st->tabs[i], i == index ? SW_SHOW : SW_HIDE);
+    RECT strip{ 0, 0, 420, kStripBottomDu + 1 };
+    MapDialogRect(dlg, &strip);
+    InvalidateRect(dlg, &strip, TRUE);
 }
 
 INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     HostState* st = Host(dlg);
 
+    INT_PTR darkResult = 0;
+    if (dark::Handle(dlg, msg, wParam, lParam, darkResult))
+        return darkResult;
+
     switch (msg) {
     case WM_INITDIALOG: {
         st = new HostState();
         st->keys = BeginKeysEdit();
         SetWindowLongPtrW(dlg, DWLP_USER, reinterpret_cast<LONG_PTR>(st));
+        dark::Apply(dlg);
 
         SendMessageW(dlg, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(
             LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP))));
 
-        HWND tab = GetDlgItem(dlg, IDC_TAB);
-        TCITEMW item = {};
-        item.mask = TCIF_TEXT;
-        item.pszText = const_cast<wchar_t*>(L"Switcher");
-        TabCtrl_InsertItem(tab, 0, &item);
-        item.pszText = const_cast<wchar_t*>(L"Key setup");
-        TabCtrl_InsertItem(tab, 1, &item);
-        item.pszText = const_cast<wchar_t*>(L"Key options");
-        TabCtrl_InsertItem(tab, 2, &item);
-
         HINSTANCE instance = reinterpret_cast<HINSTANCE>(
             GetWindowLongPtrW(dlg, GWLP_HINSTANCE));
-        st->tabSwitcher = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_TAB_SWITCHER), dlg,
-                                             SwitcherTabProc, 0);
-        st->tabKeys = CreateKeysTab(dlg, instance, st->keys);
-        st->tabOptions = CreateKeyOptionsTab(dlg, instance, st->keys);
-        PositionTabChild(dlg, st->tabSwitcher);
-        PositionTabChild(dlg, st->tabKeys);
-        PositionTabChild(dlg, st->tabOptions);
-        SelectTab(st, 0);
+        st->tabs[0] = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_TAB_SWITCHER), dlg,
+                                         SwitcherTabProc, 0);
+        st->tabs[1] = CreateKeysTab(dlg, instance, st->keys);
+        st->tabs[2] = CreateKeyOptionsTab(dlg, instance, st->keys);
+        const RECT page = PageRectPx(dlg);
+        for (HWND tab : st->tabs)
+            SetWindowPos(tab, HWND_TOP, page.left, page.top, page.right - page.left,
+                         page.bottom - page.top, SWP_NOACTIVATE);
+        SelectTab(dlg, st, 0);
 
         st->autoStartAtOpen = IsAutoStartEnabled();
         CheckDlgButton(dlg, IDC_CHK_AUTOSTART, st->autoStartAtOpen ? BST_CHECKED : BST_UNCHECKED);
         return TRUE;
     }
 
-    case WM_NOTIFY: {
-        const NMHDR* hdr = reinterpret_cast<const NMHDR*>(lParam);
-        if (st && hdr->idFrom == IDC_TAB && hdr->code == TCN_SELCHANGE)
-            SelectTab(st, TabCtrl_GetCurSel(GetDlgItem(dlg, IDC_TAB)));
-        return 0;
+    case WM_PAINT:
+        PaintTabStrip(dlg, st);
+        return TRUE;
+
+    case WM_LBUTTONDOWN: {
+        if (!st)
+            return FALSE;
+        const POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        RECT tabs[kTabCount];
+        TabRectsPx(dlg, tabs);
+        for (int i = 0; i < kTabCount; ++i)
+            if (PtInRect(&tabs[i], pt) && i != st->selected)
+                SelectTab(dlg, st, i);
+        return TRUE;
     }
 
     case WM_COMMAND:
@@ -272,7 +345,7 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lPara
             g_capturing = Capturing::None;
 
             AcquireSRWLockExclusive(&g_settingsLock);
-            CommitSwitcherTab(st->tabSwitcher);
+            CommitSwitcherTab(st->tabs[0]);
             ReleaseSRWLockExclusive(&g_settingsLock);
             SaveSettings();
 

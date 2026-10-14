@@ -2,6 +2,8 @@
 
 #include <windowsx.h>
 
+#include "darkui.h"
+
 #include <algorithm>
 
 #include <vector>
@@ -332,6 +334,34 @@ Board ActiveBoard(KbState* st)
     return BoardKeys(cfg.board, ResolvedLayoutFor(cfg));
 }
 
+// The body around the keys: a bezel of about a third of a key on every side,
+// with corners rounded the way the real board's are, so the picture reads as
+// the keyboard rather than as keys floating on the dialog.
+constexpr int kBezel = 35;
+constexpr int kBodyRadius = 55;
+
+struct Placement {
+    float scale;
+    int originX; // of the key area, not the body
+    int originY;
+};
+
+Placement Place(HWND hwnd, KbState* st)
+{
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+    const Board extent = ActiveBoard(st);
+    const int totalW = extent.width + 2 * kBezel;
+    const int totalH = extent.height + 2 * kBezel;
+    Placement p;
+    p.scale = min(static_cast<float>(w) / totalW, static_cast<float>(h) / totalH);
+    p.originX = (w - static_cast<int>(totalW * p.scale)) / 2 + static_cast<int>(kBezel * p.scale);
+    p.originY = (h - static_cast<int>(totalH * p.scale)) / 2 + static_cast<int>(kBezel * p.scale);
+    return p;
+}
+
 const KeyCap* CurrentBoard(KbState* st, int& count)
 {
     const Board board = ActiveBoard(st);
@@ -443,14 +473,10 @@ void ApplyBind(HWND hwnd, KbState* st, const Bind& bind)
 int HitTest(HWND hwnd, POINT pt, float& scale, int& originX, int& originY)
 {
     KbState* st = State(hwnd);
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    const int w = rc.right - rc.left;
-    const int h = rc.bottom - rc.top;
-    const Board extent = ActiveBoard(st);
-    scale = min(static_cast<float>(w) / extent.width, static_cast<float>(h) / extent.height);
-    originX = (w - static_cast<int>(extent.width * scale)) / 2;
-    originY = (h - static_cast<int>(extent.height * scale)) / 2;
+    const Placement p = Place(hwnd, st);
+    scale = p.scale;
+    originX = p.originX;
+    originY = p.originY;
 
     int count = 0;
     const KeyCap* board = CurrentBoard(st, count);
@@ -530,20 +556,29 @@ void PaintBoard(HWND hwnd, HDC target)
     HBITMAP bmp = CreateCompatibleBitmap(target, w, h);
     HGDIOBJ oldBmp = SelectObject(dc, bmp);
 
-    const COLORREF face = GetSysColor(COLOR_BTNFACE);
-    const COLORREF window = GetSysColor(COLOR_WINDOW);
-    const COLORREF text = GetSysColor(COLOR_BTNTEXT);
-    const COLORREF accent = GetSysColor(COLOR_HIGHLIGHT);
+    // The dark palette: the body a shade above the dialog, the keys a shade
+    // above the body, the accent for anything bound or picked.
+    const COLORREF body = RGB(48, 48, 48);
+    const COLORREF bodyEdge = RGB(66, 66, 66);
+    const COLORREF face = RGB(70, 70, 70);
+    const COLORREF faceEdge = RGB(96, 96, 96);
+    const COLORREF text = dark::kText;
+    const COLORREF accent = dark::kAccent;
 
-    HBRUSH bg = CreateSolidBrush(face);
-    FillRect(dc, &rc, bg);
-    DeleteObject(bg);
+    FillRect(dc, &rc, dark::BgBrush());
 
+    const Placement p = Place(hwnd, st);
+    const float scale = p.scale;
+    const int originX = p.originX;
+    const int originY = p.originY;
     const Board extent = ActiveBoard(st);
-    const float scale = min(static_cast<float>(w) / extent.width,
-                            static_cast<float>(h) / extent.height);
-    const int originX = (w - static_cast<int>(extent.width * scale)) / 2;
-    const int originY = (h - static_cast<int>(extent.height * scale)) / 2;
+    {
+        const RECT bodyRc{ originX - static_cast<int>(kBezel * scale),
+                           originY - static_cast<int>(kBezel * scale),
+                           originX + static_cast<int>((extent.width + kBezel) * scale),
+                           originY + static_cast<int>((extent.height + kBezel) * scale) };
+        dark::RoundBox(dc, bodyRc, max(4, static_cast<int>(kBodyRadius * scale)), body, bodyEdge);
+    }
 
     const int capFontH = max(9, static_cast<int>(34 * scale));
     const int bindFontH = max(8, static_cast<int>(26 * scale));
@@ -572,17 +607,17 @@ void PaintBoard(HWND hwnd, HDC target)
         const bool selected = i == st->selected;
         const bool hot = i == st->hot;
 
-        COLORREF fill = window;
-        if (unbindable)      fill = Blend(face, window, 40);
+        COLORREF fill = face;
+        if (unbindable)      fill = Blend(body, face, 50);
         else if (selected && st->capturing) fill = accent;
-        else if (selected)   fill = Blend(window, accent, 35);
-        else if (bound)      fill = Blend(window, accent, 18);
+        else if (selected)   fill = Blend(face, accent, 60);
+        else if (bound)      fill = Blend(face, accent, 30);
         if (hot && !selected)
-            fill = Blend(fill, RGB(255, 255, 255), 25);
+            fill = Blend(fill, RGB(255, 255, 255), 12);
 
         HBRUSH brush = CreateSolidBrush(fill);
         HPEN pen = CreatePen(PS_SOLID, max(1, static_cast<int>(scale * (selected ? 4 : 2))),
-                             bound || selected ? accent : Blend(face, text, 30));
+                             bound || selected ? accent : faceEdge);
         HGDIOBJ oldBrush = SelectObject(dc, brush);
         HGDIOBJ oldPen = SelectObject(dc, pen);
         const int radius = max(2, static_cast<int>(14 * scale));
@@ -592,8 +627,7 @@ void PaintBoard(HWND hwnd, HDC target)
         DeleteObject(brush);
         DeleteObject(pen);
 
-        SetTextColor(dc, unbindable ? Blend(face, text, 45)
-                                    : (selected && st->capturing ? window : text));
+        SetTextColor(dc, unbindable ? Blend(face, text, 45) : text);
         SelectObject(dc, capFont);
         RECT tr = kr;
         tr.top += max(1, static_cast<int>(6 * scale));
@@ -602,7 +636,7 @@ void PaintBoard(HWND hwnd, HDC target)
 
         if (bound) {
             SelectObject(dc, bindFont);
-            SetTextColor(dc, selected && st->capturing ? window : Blend(text, accent, 60));
+            SetTextColor(dc, selected ? text : Blend(text, accent, 35));
             RECT br = kr;
             br.top = kr.top + (kr.bottom - kr.top) / 2;
             br.bottom -= max(1, static_cast<int>(4 * scale));
