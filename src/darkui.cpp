@@ -12,6 +12,13 @@ namespace {
 HBRUSH g_bgBrush = nullptr;
 HBRUSH g_cardBrush = nullptr;
 
+COLORREF Blend(COLORREF a, COLORREF b, int pct)
+{
+    return RGB((GetRValue(a) * (100 - pct) + GetRValue(b) * pct) / 100,
+               (GetGValue(a) * (100 - pct) + GetGValue(b) * pct) / 100,
+               (GetBValue(a) * (100 - pct) + GetBValue(b) * pct) / 100);
+}
+
 bool ClassIs(HWND hwnd, const wchar_t* name)
 {
     wchar_t cls[32] = {};
@@ -101,6 +108,85 @@ LRESULT CALLBACK GroupBoxProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
     return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
+// A drop-down list combo box: the plate with the current choice and a chevron.
+// The control's own look is the one from two decades ago whichever theme it
+// wears, so the closed box is painted here from a subclass; the list it drops
+// is a window of its own and keeps the dark theme's.
+void PaintCombo(HWND hwnd)
+{
+    PAINTSTRUCT ps;
+    HDC dc = BeginPaint(hwnd, &ps);
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    FillRect(dc, &rc, BgBrush());
+
+    const bool disabled = !IsWindowEnabled(hwnd);
+    const bool open = SendMessageW(hwnd, CB_GETDROPPEDSTATE, 0, 0) != 0;
+    const bool focused = GetFocus() == hwnd;
+    POINT cursor;
+    GetCursorPos(&cursor);
+    const bool hot = !disabled && WindowFromPoint(cursor) == hwnd;
+
+    RECT plate = rc;
+    plate.right -= 1;
+    plate.bottom -= 1;
+    const COLORREF fill = disabled ? RGB(38, 38, 38) : hot || open ? RGB(64, 64, 64) : kCard;
+    const COLORREF line = open || focused ? kAccent : hot ? RGB(96, 96, 96) : RGB(78, 78, 78);
+    RoundBox(dc, plate, Px(hwnd, 10), fill, line);
+
+    HGDIOBJ oldFont = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(hwnd, WM_GETFONT, 0, 0)));
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, disabled ? kDim : kText);
+    const LRESULT sel = SendMessageW(hwnd, CB_GETCURSEL, 0, 0);
+    wchar_t text[128] = {};
+    if (sel >= 0 && SendMessageW(hwnd, CB_GETLBTEXTLEN, sel, 0) < 128)
+        SendMessageW(hwnd, CB_GETLBTEXT, sel, reinterpret_cast<LPARAM>(text));
+    RECT tr{ rc.left + Px(hwnd, 9), rc.top, rc.right - Px(hwnd, 26), rc.bottom };
+    DrawTextW(dc, text, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    SelectObject(dc, oldFont);
+
+    // The chevron: a small open V, pointing down.
+    {
+        const int cx = rc.right - Px(hwnd, 14);
+        const int cy = (rc.top + rc.bottom) / 2;
+        const int half = Px(hwnd, 4);
+        HPEN pen = CreatePen(PS_SOLID, GetDpiForWindow(hwnd) >= 144 ? 2 : 1, disabled ? kDim : kText);
+        HGDIOBJ oldPen = SelectObject(dc, pen);
+        const POINT pts[3] = { { cx - half, cy - half / 2 }, { cx, cy + half / 2 }, { cx + half, cy - half / 2 } };
+        Polyline(dc, pts, 3);
+        SelectObject(dc, oldPen);
+        DeleteObject(pen);
+    }
+    EndPaint(hwnd, &ps);
+}
+
+LRESULT CALLBACK ComboProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR)
+{
+    switch (msg) {
+    case WM_PAINT:
+        PaintCombo(hwnd);
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_MOUSEMOVE: {
+        // Hover is shown by repainting on the way in and the way out.
+        TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
+        TrackMouseEvent(&tme);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        break;
+    }
+    case WM_MOUSELEAVE:
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+        InvalidateRect(hwnd, nullptr, FALSE);
+        break;
+    case WM_NCDESTROY:
+        RemoveWindowSubclass(hwnd, ComboProc, id);
+        break;
+    }
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
 // Everything a themed Button control would have painted light: the box, the
 // dot or the plate, and the text. CDRF_SKIPDEFAULT then keeps the theme's own
 // painting off.
@@ -162,7 +248,7 @@ LRESULT DrawButton(const NMCUSTOMDRAW& cd)
             DeleteObject(brush);
             DeleteObject(pen);
         } else {
-            RoundBox(dc, box, Px(hwnd, 3), fill, line);
+            RoundBox(dc, box, Px(hwnd, 4), fill, line);
             if (checked)
                 DrawCheckMark(dc, box, kText, dpi);
         }
@@ -180,18 +266,25 @@ LRESULT DrawButton(const NMCUSTOMDRAW& cd)
     }
 
     default: {
-        // Push buttons. The dialog manager moves BS_DEFPUSHBUTTON to whichever
-        // button has the focus, so the accent outline follows it.
-        const bool def = type == BS_DEFPUSHBUTTON;
+        // Push buttons. The default one is filled with the accent, the way a
+        // primary button is; the dialog manager moves BS_DEFPUSHBUTTON to
+        // whichever button has the focus, so the fill follows it.
+        const bool def = type == BS_DEFPUSHBUTTON && !disabled;
         RECT plate = rc;
         plate.right -= 1;
         plate.bottom -= 1;
-        const COLORREF fill = disabled ? RGB(38, 38, 38)
-                              : pressed ? RGB(32, 32, 32)
-                              : hot     ? RGB(62, 62, 62)
-                                        : kCard;
-        RoundBox(dc, plate, Px(hwnd, 6), fill, def && !disabled ? kAccent : kLine);
-        SetTextColor(dc, textColor);
+        COLORREF fill;
+        if (def)
+            fill = pressed ? Blend(kAccent, RGB(0, 0, 0), 25)
+                 : hot     ? Blend(kAccent, RGB(255, 255, 255), 15)
+                           : kAccent;
+        else
+            fill = disabled ? RGB(38, 38, 38)
+                 : pressed  ? RGB(32, 32, 32)
+                 : hot      ? RGB(64, 64, 64)
+                            : kCard;
+        RoundBox(dc, plate, Px(hwnd, 10), fill, def ? fill : hot ? RGB(96, 96, 96) : RGB(78, 78, 78));
+        SetTextColor(dc, def ? RGB(255, 255, 255) : textColor);
         DrawTextW(dc, text.c_str(), -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         if (focused) {
             RECT fr = rc;
@@ -249,9 +342,12 @@ void Apply(HWND dlg)
         DwmSetWindowAttribute(dlg, 19, &on, sizeof(on));
 
     for (HWND child = GetWindow(dlg, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
-        if (ClassIs(child, L"ComboBox"))
+        if (ClassIs(child, L"ComboBox")) {
+            // The dark theme for the list it drops; the closed box is painted
+            // by the subclass.
             SetWindowTheme(child, L"DarkMode_CFD", nullptr);
-        else if (ClassIs(child, L"ListBox")) {
+            SetWindowSubclass(child, ComboProc, 1, 0);
+        } else if (ClassIs(child, L"ListBox")) {
             // The dark scrollbar, and no frame: the border a list box draws is
             // a light one whatever the theme, and the fill is contrast enough.
             SetWindowTheme(child, L"DarkMode_Explorer", nullptr);
@@ -260,6 +356,13 @@ void Apply(HWND dlg)
                            GetWindowLongW(child, GWL_EXSTYLE) & ~(WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
             SetWindowPos(child, nullptr, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+            // Rounded like the plates around it. A list box cannot be told to
+            // paint rounded corners, but it can be clipped to them.
+            RECT rc;
+            GetWindowRect(child, &rc);
+            const int radius = Px(child, 10);
+            SetWindowRgn(child, CreateRoundRectRgn(0, 0, rc.right - rc.left + 1,
+                                                   rc.bottom - rc.top + 1, radius, radius), TRUE);
         }
         else if (ClassIs(child, L"Button") &&
                  (GetWindowLongW(child, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX)
