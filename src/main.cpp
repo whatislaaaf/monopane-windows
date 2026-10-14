@@ -325,10 +325,27 @@ void ActivateSelection()
     for (HWND sibling : siblings) {
         if (IsIconic(sibling))
             ShowWindow(sibling, SW_RESTORE);
-        SetWindowPos(sibling, HWND_TOP, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     ActivateWindow(target);
+
+    // The siblings are stacked only now, and directly behind the target
+    // rather than at HWND_TOP. Windows will not raise a window to the top
+    // unless its thread is the foreground one: it goes behind the foreground
+    // window instead. Before the activation that is whatever took over when
+    // the overlay hid — the app the switcher was opened from — so a sibling
+    // raised then ended up behind that app, not behind the window picked.
+    // The target's own trip to the top is posted to its thread and may not
+    // have happened yet, hence putting it there by hand first.
+    if (!siblings.empty()) {
+        constexpr UINT kStack = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+        SetWindowPos(target, HWND_TOP, 0, 0, 0, 0, kStack);
+        // Slotting a window in among the always-on-top ones would make it
+        // always-on-top too, so behind a target that is one, the top of the
+        // ordinary windows is as close as a sibling gets.
+        const bool pinned = (GetWindowLongW(target, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+        for (HWND sibling : siblings)
+            SetWindowPos(sibling, pinned ? HWND_TOP : target, 0, 0, 0, 0, kStack);
+    }
 }
 
 // ---------------------------------------------------------------------------
