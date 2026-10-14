@@ -173,7 +173,7 @@ is wrong.
 
 `board` picks its shape: `full` is a full-size board with a nav cluster,
 `mx-keys-mini` the Logitech MX Keys Mini for Mac (control, option, cmd and
-fn along the bottom, half-height up and down arrows). Bindings are by scancode
+fn along the bottom, a short function row and half-height arrows). Bindings are by scancode
 either way, so switching it only changes the picture. Both are on the Key
 options tab too.
 
