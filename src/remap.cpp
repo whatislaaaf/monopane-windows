@@ -296,18 +296,23 @@ bool HandlePhysicalKey(const KBDLLHOOKSTRUCT& k, bool down)
     if (k.flags & LLKHF_INJECTED)
         return false;
 
-    // Both settings captures take raw keystrokes ahead of everything, including
+    KeyId id = MakeKeyId(k.scanCode, (k.flags & LLKHF_EXTENDED) != 0);
+    // Undo a kernel divert, so bindings stay keyed to the physical key the
+    // user clicked on the picture rather than the spare it now arrives as.
+    // The captures below get the same identity: a chord captured as the
+    // spare would never match, since matching runs on the key it came from.
+    if (const KeyId original = g_alias[KeySlot(id)])
+        id = original;
+
+    // Both settings captures take keystrokes ahead of everything, including
     // the pause, and swallow them so nothing else reacts. The hotkey list's
     // chords are matched against physical keys, so its capture is fed here,
     // before any remapping; the switcher's captures are fed by the hook after
     // it, so they record what the switcher will actually see.
-    {
-        const KeyId raw = MakeKeyId(k.scanCode, (k.flags & LLKHF_EXTENDED) != 0);
-        if (CaptureActive() && ForwardCaptureKey(raw, down))
-            return true; // the keyboard picker, capturing one key
-        if (KeysChordCaptureArmed() && keychord::FeedChordKey(raw, down, KeyOrigin::Physical))
-            return true; // the hotkey list, capturing a whole chord
-    }
+    if (CaptureActive() && ForwardCaptureKey(id, down))
+        return true; // the keyboard picker, capturing one key
+    if (KeysChordCaptureArmed() && keychord::FeedChordKey(id, down, KeyOrigin::Physical))
+        return true; // the hotkey list, capturing a whole chord
 
     if (g_paused)
         return false;
@@ -316,12 +321,6 @@ bool HandlePhysicalKey(const KBDLLHOOKSTRUCT& k, bool down)
     // otherwise look exactly like a real one and leak into the layer.
     if (k.scanCode == kAltGrFillerScan)
         return g_base[KeySlot(kScRAlt)].action != Action::None;
-
-    KeyId id = MakeKeyId(k.scanCode, (k.flags & LLKHF_EXTENDED) != 0);
-    // Undo a kernel divert, so bindings stay keyed to the physical key the
-    // user clicked on the picture rather than the spare it now arrives as.
-    if (const KeyId original = g_alias[KeySlot(id)])
-        id = original;
 
     const int slot = KeySlot(id);
     const Bind& base = g_base[slot];
