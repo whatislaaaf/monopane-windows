@@ -222,6 +222,7 @@ void ResetToDefaults(Config& cfg)
     cfg.chords.push_back(StartMenuChord());
 
     cfg.layout = BoardLayout::Auto;
+    cfg.board = BoardShape::Full;
 }
 
 
@@ -344,6 +345,9 @@ void LoadConfig()
                 g_config.layout = value == "ansi" ? BoardLayout::Ansi
                                 : value == "iso"  ? BoardLayout::Iso
                                                   : BoardLayout::Auto;
+            else if (name == "board")
+                g_config.board = value == "mx-keys-mini" ? BoardShape::MxKeysMiniMac
+                                                         : BoardShape::Full;
             continue;
         }
 
@@ -384,6 +388,8 @@ bool SaveConfig()
             : g_config.layout == BoardLayout::Iso ? "iso"
                                                   : "auto") +
            "\r\n";
+    out += std::string("board            = ") +
+           (g_config.board == BoardShape::MxKeysMiniMac ? "mx-keys-mini" : "full") + "\r\n";
 
     for (int pass = 0; pass < 2; ++pass) {
         const Bind* table = pass == 0 ? g_config.base : g_config.nav;

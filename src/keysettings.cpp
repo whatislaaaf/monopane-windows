@@ -171,6 +171,13 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
         SendDlgItemMessageW(dlg, IDC_CMB_LAYOUT, CB_SETCURSEL,
                             static_cast<WPARAM>(st->work.layout), 0);
 
+        SendDlgItemMessageW(dlg, IDC_CMB_BOARD, CB_ADDSTRING, 0,
+                            reinterpret_cast<LPARAM>(L"Full-size"));
+        SendDlgItemMessageW(dlg, IDC_CMB_BOARD, CB_ADDSTRING, 0,
+                            reinterpret_cast<LPARAM>(L"MX Keys Mini for Mac"));
+        SendDlgItemMessageW(dlg, IDC_CMB_BOARD, CB_SETCURSEL,
+                            static_cast<WPARAM>(st->work.board), 0);
+
         UpdateScancodeMapText(dlg, st->work);
         return TRUE;
     }
@@ -281,6 +288,13 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
                 UpdateScancodeMapText(dlg, st->work);
             }
             return TRUE;
+        case IDC_CMB_BOARD:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                const LRESULT sel = SendDlgItemMessageW(dlg, IDC_CMB_BOARD, CB_GETCURSEL, 0, 0);
+                st->work.board = static_cast<BoardShape>(sel < 0 ? 0 : sel);
+                InvalidateRect(GetDlgItem(st->tabKeys, IDC_KEYBOARD), nullptr, FALSE);
+            }
+            return TRUE;
         case IDC_BTN_RESETDEFAULTS:
             if (MessageBoxW(dlg,
                             L"Reset every key binding to the defaults?\n\n"
@@ -288,8 +302,10 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
                             L"ijkl/h/; navigate and u/o switch desktops.",
                             L"Monopane", MB_YESNO | MB_ICONQUESTION) == IDYES) {
                 const BoardLayout keepLayout = st->work.layout;
+                const BoardShape keepBoard = st->work.board;
                 ResetToDefaults(st->work);
                 st->work.layout = keepLayout;
+                st->work.board = keepBoard;
                 RefreshChordList(dlg, st);
                 InvalidateRect(GetDlgItem(st->tabKeys, IDC_KEYBOARD), nullptr, FALSE);
                 UpdateScancodeMapText(dlg, st->work);
