@@ -114,6 +114,12 @@ ScancodeMapPlan BuildScancodeMap(const Config& cfg)
         plan.overflow = true;
     }
 
+    // The hook aliases every diverted scancode back to the key it came from,
+    // the Windows-key one included: once the map is in, the key given that role
+    // arrives as Right Win, and without the alias it would be looked up as the
+    // physical Right Win - which, diverted, is bound to something else.
+    plan.diverts = entries;
+
     plan.blob.reserve(16 + 4 * entries.size());
     AppendDword(plan.blob, 0); // version
     AppendDword(plan.blob, 0); // flags
