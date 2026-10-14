@@ -28,12 +28,13 @@ cl /nologo /std:c++17 /O2 /W4 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX ^
    src\main.cpp src\window_list.cpp src\fuzzy.cpp src\settings.cpp src\aliases.cpp ^
    src\display.cpp src\paint.cpp ^
    src\remap.cpp src\config.cpp src\keyboard.cpp src\scancodemap.cpp src\keysettings.cpp ^
+   src\darkui.cpp ^
    external\keychord\keychord_name.cpp external\keychord\keychord_chord.cpp ^
    external\keychord\keychord_capture.cpp ^
    build\monopane.res ^
    /Fo:build\ /Fe:build\monopane.exe ^
    /link user32.lib gdi32.lib shell32.lib comctl32.lib dwmapi.lib ^
-         advapi32.lib ole32.lib version.lib /SUBSYSTEM:WINDOWS
+         advapi32.lib ole32.lib version.lib uxtheme.lib /SUBSYSTEM:WINDOWS
 if errorlevel 1 exit /b 1
 
 echo.

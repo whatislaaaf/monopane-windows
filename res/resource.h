@@ -8,7 +8,6 @@
 #define IDD_TAB_KEYS            302
 #define IDD_TAB_KEYOPTIONS      303
 
-#define IDC_TAB                 310
 #define IDC_CHK_AUTOSTART       311
 #define IDC_BTN_CONFIGFOLDER    313
 

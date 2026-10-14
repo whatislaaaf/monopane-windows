@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../res/resource.h"
+#include "darkui.h"
 #include "keyboard.h"
 #include "lock.h"
 #include "remap.h"
@@ -39,10 +40,15 @@ KeysEdit* State(HWND dlg)
 
 INT_PTR CALLBACK KeysTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    INT_PTR darkResult = 0;
+    if (dark::Handle(dlg, msg, wParam, lParam, darkResult))
+        return darkResult;
+
     switch (msg) {
     case WM_INITDIALOG: {
         KeysEdit* st = reinterpret_cast<KeysEdit*>(lParam);
         SetWindowLongPtrW(dlg, DWLP_USER, reinterpret_cast<LONG_PTR>(st));
+        dark::Apply(dlg);
         CheckRadioButton(dlg, IDC_RAD_BASE, IDC_RAD_NAV, IDC_RAD_BASE);
         SendDlgItemMessageW(dlg, IDC_KEYBOARD, KBM_SETCONFIG,
                             reinterpret_cast<WPARAM>(&st->work), 0);
@@ -153,10 +159,15 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
 {
     KeysEdit* st = State(dlg);
 
+    INT_PTR darkResult = 0;
+    if (dark::Handle(dlg, msg, wParam, lParam, darkResult))
+        return darkResult;
+
     switch (msg) {
     case WM_INITDIALOG: {
         st = reinterpret_cast<KeysEdit*>(lParam);
         SetWindowLongPtrW(dlg, DWLP_USER, reinterpret_cast<LONG_PTR>(st));
+        dark::Apply(dlg);
 
         RefreshChordList(dlg, st);
         SetChordHint(dlg, L"Hotkeys match exactly: every listed key must be held and "
