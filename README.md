@@ -141,6 +141,7 @@ Monopane to reload.
 ```ini
 [options]
 layout           = auto      # auto | ansi | iso
+board            = full      # full | mx-keys-mini
 
 [base]
 3A = key:0E               # Caps Lock -> Backspace
@@ -169,6 +170,12 @@ four modifiers and sixteen chords.
 scancode `0x56`, the extra key beside left Shift, which only resolves on ISO —
 that follows the *layout*, not the hardware, so set it explicitly if the guess
 is wrong.
+
+`board` picks its shape: `full` is a full-size board with a nav cluster,
+`mx-keys-mini` the Logitech MX Keys Mini for Mac (control, option, cmd and
+fn along the bottom, half-height up and down arrows). Bindings are by scancode
+either way, so switching it only changes the picture. Both are on the Key
+options tab too.
 
 ### Win+L and the Scancode Map
 

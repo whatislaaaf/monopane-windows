@@ -39,3 +39,4 @@
 #define IDC_BTN_RESETDEFAULTS   356
 #define IDC_TXT_SCMAP           357
 #define IDC_BTN_SCMAP_RESET     358
+#define IDC_CMB_BOARD           359

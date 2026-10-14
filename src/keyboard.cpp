@@ -125,19 +125,133 @@ const KeyCap kBoard[] = {
     { 0xE04D, L"\x2192",  1725, 550, 100, 100, KCF_NONE },
 };
 
+constexpr int kBoardW = 1825;
+constexpr int kBoardH = 650;
+
+// The MX Keys Mini for Mac: 14.5 units wide, no nav cluster, and an inverted-T
+// of arrows with half-height up and down tucked into the bottom row. On
+// Windows its modifiers arrive as what they are on a Mac: control as Ctrl,
+// option as Alt, cmd as Win. Fn is handled in the keyboard and never arrives.
+const KeyCap kMiniBoard[] = {
+    // function row
+    { 0x01,   L"esc",     0,    0,   150, 100, KCF_NONE },
+    { 0x3B,   L"F1",      150,  0,   100, 100, KCF_NONE },
+    { 0x3C,   L"F2",      250,  0,   100, 100, KCF_NONE },
+    { 0x3D,   L"F3",      350,  0,   100, 100, KCF_NONE },
+    { 0x3E,   L"F4",      450,  0,   100, 100, KCF_NONE },
+    { 0x3F,   L"F5",      550,  0,   100, 100, KCF_NONE },
+    { 0x40,   L"F6",      650,  0,   100, 100, KCF_NONE },
+    { 0x41,   L"F7",      750,  0,   100, 100, KCF_NONE },
+    { 0x42,   L"F8",      850,  0,   100, 100, KCF_NONE },
+    { 0x43,   L"F9",      950,  0,   100, 100, KCF_NONE },
+    { 0x44,   L"F10",     1050, 0,   100, 100, KCF_NONE },
+    { 0x57,   L"F11",     1150, 0,   100, 100, KCF_NONE },
+    { 0x58,   L"F12",     1250, 0,   100, 100, KCF_NONE },
+
+    // number row
+    { 0x29,   L"`",       0,    100, 100, 100, KCF_NONE },
+    { 0x02,   L"1",       100,  100, 100, 100, KCF_NONE },
+    { 0x03,   L"2",       200,  100, 100, 100, KCF_NONE },
+    { 0x04,   L"3",       300,  100, 100, 100, KCF_NONE },
+    { 0x05,   L"4",       400,  100, 100, 100, KCF_NONE },
+    { 0x06,   L"5",       500,  100, 100, 100, KCF_NONE },
+    { 0x07,   L"6",       600,  100, 100, 100, KCF_NONE },
+    { 0x08,   L"7",       700,  100, 100, 100, KCF_NONE },
+    { 0x09,   L"8",       800,  100, 100, 100, KCF_NONE },
+    { 0x0A,   L"9",       900,  100, 100, 100, KCF_NONE },
+    { 0x0B,   L"0",       1000, 100, 100, 100, KCF_NONE },
+    { 0x0C,   L"-",       1100, 100, 100, 100, KCF_NONE },
+    { 0x0D,   L"=",       1200, 100, 100, 100, KCF_NONE },
+    { 0x0E,   L"delete",  1300, 100, 150, 100, KCF_NONE },
+
+    // top letter row
+    { 0x0F,   L"tab",     0,    200, 150, 100, KCF_NONE },
+    { 0x10,   L"Q",       150,  200, 100, 100, KCF_NONE },
+    { 0x11,   L"W",       250,  200, 100, 100, KCF_NONE },
+    { 0x12,   L"E",       350,  200, 100, 100, KCF_NONE },
+    { 0x13,   L"R",       450,  200, 100, 100, KCF_NONE },
+    { 0x14,   L"T",       550,  200, 100, 100, KCF_NONE },
+    { 0x15,   L"Y",       650,  200, 100, 100, KCF_NONE },
+    { 0x16,   L"U",       750,  200, 100, 100, KCF_NONE },
+    { 0x17,   L"I",       850,  200, 100, 100, KCF_NONE },
+    { 0x18,   L"O",       950,  200, 100, 100, KCF_NONE },
+    { 0x19,   L"P",       1050, 200, 100, 100, KCF_NONE },
+    { 0x1A,   L"[",       1150, 200, 100, 100, KCF_NONE },
+    { 0x1B,   L"]",       1250, 200, 100, 100, KCF_NONE },
+    { 0x2B,   L"\\",      1350, 200, 100, 100, KCF_ANSI_ONLY },
+
+    // home row
+    { 0x3A,   L"caps",    0,    300, 175, 100, KCF_NONE },
+    { 0x1E,   L"A",       175,  300, 100, 100, KCF_NONE },
+    { 0x1F,   L"S",       275,  300, 100, 100, KCF_NONE },
+    { 0x20,   L"D",       375,  300, 100, 100, KCF_NONE },
+    { 0x21,   L"F",       475,  300, 100, 100, KCF_NONE },
+    { 0x22,   L"G",       575,  300, 100, 100, KCF_NONE },
+    { 0x23,   L"H",       675,  300, 100, 100, KCF_NONE },
+    { 0x24,   L"J",       775,  300, 100, 100, KCF_NONE },
+    { 0x25,   L"K",       875,  300, 100, 100, KCF_NONE },
+    { 0x26,   L"L",       975,  300, 100, 100, KCF_NONE },
+    { 0x27,   L";",       1075, 300, 100, 100, KCF_NONE },
+    { 0x28,   L"'",       1175, 300, 100, 100, KCF_NONE },
+    { 0x1C,   L"return",  1275, 300, 175, 100, KCF_ANSI_ONLY },
+    { 0x2B,   L"#",       1275, 300, 75,  100, KCF_ISO_ONLY },
+    { 0x1C,   L"return",  1350, 200, 100, 200, KCF_ISO_ONLY },
+
+    // bottom letter row
+    { 0x2A,   L"shift",   0,    400, 225, 100, KCF_ANSI_ONLY },
+    { 0x2A,   L"shift",   0,    400, 125, 100, KCF_ISO_ONLY },
+    { 0x56,   L"\\",      125,  400, 100, 100, KCF_ISO_ONLY },
+    { 0x2C,   L"Z",       225,  400, 100, 100, KCF_NONE },
+    { 0x2D,   L"X",       325,  400, 100, 100, KCF_NONE },
+    { 0x2E,   L"C",       425,  400, 100, 100, KCF_NONE },
+    { 0x2F,   L"V",       525,  400, 100, 100, KCF_NONE },
+    { 0x30,   L"B",       625,  400, 100, 100, KCF_NONE },
+    { 0x31,   L"N",       725,  400, 100, 100, KCF_NONE },
+    { 0x32,   L"M",       825,  400, 100, 100, KCF_NONE },
+    { 0x33,   L",",       925,  400, 100, 100, KCF_NONE },
+    { 0x34,   L".",       1025, 400, 100, 100, KCF_NONE },
+    { 0x35,   L"/",       1125, 400, 100, 100, KCF_NONE },
+    { 0x36,   L"shift",   1225, 400, 225, 100, KCF_NONE },
+
+    // modifier row
+    { kNoKey, L"fn",      0,    500, 100, 100, KCF_UNBINDABLE },
+    { 0x1D,   L"ctrl",    100,  500, 100, 100, KCF_NONE },
+    { 0x38,   L"opt",     200,  500, 100, 100, KCF_NONE },
+    { 0xE05B, L"cmd",     300,  500, 125, 100, KCF_NONE },
+    { 0x39,   L"",        425,  500, 500, 100, KCF_NONE },
+    { 0xE05C, L"cmd",     925,  500, 125, 100, KCF_NONE },
+    { 0xE038, L"opt",     1050, 500, 100, 100, KCF_NONE },
+    { 0xE04B, L"\x2190",  1150, 500, 100, 100, KCF_NONE },
+    { 0xE048, L"\x2191",  1250, 500, 100, 50,  KCF_NONE },
+    { 0xE050, L"\x2193",  1250, 550, 100, 50,  KCF_NONE },
+    { 0xE04D, L"\x2192",  1350, 500, 100, 100, KCF_NONE },
+};
+
+constexpr int kMiniBoardW = 1450;
+constexpr int kMiniBoardH = 600;
+
 std::vector<KeyCap> g_ansi;
 std::vector<KeyCap> g_iso;
+std::vector<KeyCap> g_miniAnsi;
+std::vector<KeyCap> g_miniIso;
+
+template <size_t N>
+void Filter(const KeyCap (&all)[N], std::vector<KeyCap>& ansi, std::vector<KeyCap>& iso)
+{
+    for (const KeyCap& k : all) {
+        if (!(k.flags & KCF_ISO_ONLY))
+            ansi.push_back(k);
+        if (!(k.flags & KCF_ANSI_ONLY))
+            iso.push_back(k);
+    }
+}
 
 void BuildFilteredBoards()
 {
     if (!g_ansi.empty())
         return;
-    for (const KeyCap& k : kBoard) {
-        if (!(k.flags & KCF_ISO_ONLY))
-            g_ansi.push_back(k);
-        if (!(k.flags & KCF_ANSI_ONLY))
-            g_iso.push_back(k);
-    }
+    Filter(kBoard, g_ansi, g_iso);
+    Filter(kMiniBoard, g_miniAnsi, g_miniIso);
 }
 
 // ------------------------------------------------------------------ naming
@@ -204,9 +318,17 @@ bool BindIsRole(const Bind& b)
     }
 }
 
+Board ActiveBoard(KbState* st)
+{
+    const Config& cfg = st && st->cfg ? *st->cfg : g_config;
+    return BoardKeys(cfg.board, ResolvedLayoutFor(cfg));
+}
+
 const KeyCap* CurrentBoard(KbState* st, int& count)
 {
-    return BoardKeys(st && st->cfg ? ResolvedLayoutFor(*st->cfg) : ResolvedLayout(), count);
+    const Board board = ActiveBoard(st);
+    count = board.count;
+    return board.keys;
 }
 
 Bind* BindFor(KbState* st, KeyId id)
@@ -317,9 +439,10 @@ int HitTest(HWND hwnd, POINT pt, float& scale, int& originX, int& originY)
     GetClientRect(hwnd, &rc);
     const int w = rc.right - rc.left;
     const int h = rc.bottom - rc.top;
-    scale = min(static_cast<float>(w) / kBoardW, static_cast<float>(h) / kBoardH);
-    originX = (w - static_cast<int>(kBoardW * scale)) / 2;
-    originY = (h - static_cast<int>(kBoardH * scale)) / 2;
+    const Board extent = ActiveBoard(st);
+    scale = min(static_cast<float>(w) / extent.width, static_cast<float>(h) / extent.height);
+    originX = (w - static_cast<int>(extent.width * scale)) / 2;
+    originY = (h - static_cast<int>(extent.height * scale)) / 2;
 
     int count = 0;
     const KeyCap* board = CurrentBoard(st, count);
@@ -408,9 +531,11 @@ void PaintBoard(HWND hwnd, HDC target)
     FillRect(dc, &rc, bg);
     DeleteObject(bg);
 
-    const float scale = min(static_cast<float>(w) / kBoardW, static_cast<float>(h) / kBoardH);
-    const int originX = (w - static_cast<int>(kBoardW * scale)) / 2;
-    const int originY = (h - static_cast<int>(kBoardH * scale)) / 2;
+    const Board extent = ActiveBoard(st);
+    const float scale = min(static_cast<float>(w) / extent.width,
+                            static_cast<float>(h) / extent.height);
+    const int originX = (w - static_cast<int>(extent.width * scale)) / 2;
+    const int originY = (h - static_cast<int>(extent.height * scale)) / 2;
 
     const int capFontH = max(9, static_cast<int>(34 * scale));
     const int bindFontH = max(8, static_cast<int>(26 * scale));
@@ -639,12 +764,15 @@ LRESULT CALLBACK KeyboardWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
 // ------------------------------------------------------------ public surface
 
-const KeyCap* BoardKeys(BoardLayout layout, int& count)
+Board BoardKeys(BoardShape shape, BoardLayout layout)
 {
     BuildFilteredBoards();
-    const std::vector<KeyCap>& board = layout == BoardLayout::Iso ? g_iso : g_ansi;
-    count = static_cast<int>(board.size());
-    return board.data();
+    const bool iso = layout == BoardLayout::Iso;
+    const bool mini = shape == BoardShape::MxKeysMiniMac;
+    const std::vector<KeyCap>& keys = mini ? (iso ? g_miniIso : g_miniAnsi)
+                                           : (iso ? g_iso : g_ansi);
+    return Board{ keys.data(), static_cast<int>(keys.size()),
+                  mini ? kMiniBoardW : kBoardW, mini ? kMiniBoardH : kBoardH };
 }
 
 

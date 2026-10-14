@@ -80,10 +80,13 @@ BEGIN
     LTEXT           "", IDC_TXT_CHORD_HINT, 16, 92, 364, 16
 
     GROUPBOX        "Keyboard", -1, 8, 118, 384, 40
-    LTEXT           "Layout:", -1, 16, 134, 30, 8
-    COMBOBOX        IDC_CMB_LAYOUT, 50, 131, 90, 60,
+    LTEXT           "Board:", -1, 16, 134, 26, 8
+    COMBOBOX        IDC_CMB_BOARD, 44, 131, 100, 60,
                     CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Reset all keys to defaults", IDC_BTN_RESETDEFAULTS, 150, 131, 110, 14
+    LTEXT           "Layout:", -1, 154, 134, 28, 8
+    COMBOBOX        IDC_CMB_LAYOUT, 184, 131, 66, 60,
+                    CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Reset all keys to defaults", IDC_BTN_RESETDEFAULTS, 270, 131, 110, 14
 
     GROUPBOX        "Kernel Scancode Map", -1, 8, 164, 384, 62
     LTEXT           "", IDC_TXT_SCMAP, 16, 178, 300, 42

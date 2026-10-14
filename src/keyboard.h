@@ -33,10 +33,15 @@ struct KeyCap {
     uint8_t flags;
 };
 
-constexpr int kBoardW = 1825;
-constexpr int kBoardH = 650;
+// One drawable keyboard: its keys, and the extent they cover.
+struct Board {
+    const KeyCap* keys;
+    int count;
+    int width, height;
+};
 
-const KeyCap* BoardKeys(BoardLayout layout, int& count);
+// `layout` must already be resolved to ANSI or ISO.
+Board BoardKeys(BoardShape shape, BoardLayout layout);
 
 // ------------------------------------------------------- the picker control
 
