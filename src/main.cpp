@@ -641,15 +641,38 @@ DWORD WINAPI HookThreadProc(LPVOID)
     if (!g_keyboardHook)
         return 1;
 
-    // Nothing but the hook and the key map's requests come through here.
+    // Windows calls the most recently installed low-level hook first, and an
+    // app started after this one - at logon that is most of them - sees every
+    // key before the key map does. One that swallows a key the map depends
+    // on breaks it outright: the right cmd key the Scancode Map turns into
+    // F24 vanished that way, so its nav layer never engaged. So the hook is
+    // put back at the front of the chain every few seconds. The new one goes
+    // in before the old one comes out, and neither call pumps messages, so
+    // no key can fall between them or be seen twice.
+    constexpr UINT kRehookMs = 5000;
+    const UINT_PTR rehookTimer = SetTimer(nullptr, 0, kRehookMs, nullptr);
+
+    // Nothing but the hook, its timer and the key map's requests come
+    // through here.
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         switch (msg.message) {
+        case WM_TIMER:
+            if (msg.hwnd == nullptr && msg.wParam == rehookTimer) {
+                if (HHOOK fresh = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc,
+                                                    g_hInstance, 0)) {
+                    UnhookWindowsHookEx(g_keyboardHook);
+                    g_keyboardHook = fresh;
+                }
+            }
+            break;
         case remap::WM_REMAP_RELOAD:  remap::ReloadConfig(); break;
         case remap::WM_REMAP_PAUSE:   remap::SetPaused(msg.wParam != 0); break;
         case remap::WM_REMAP_RELEASE: remap::ReleaseAll(); break;
         }
     }
 
+    if (rehookTimer)
+        KillTimer(nullptr, rehookTimer);
     UnhookWindowsHookEx(g_keyboardHook);
     remap::BindHookThread(0);
     remap::ReleaseAll();
