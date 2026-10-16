@@ -37,6 +37,12 @@ ScancodeMapPlan BuildScancodeMap(const Config& cfg);
 bool ValidateScancodeMap(const std::vector<BYTE>& blob);
 
 bool ReadCurrentScancodeMap(std::vector<BYTE>& out);
+
+// The diverts of the map in the registry, whatever config asked for it. This,
+// not the plan, is what the hook must undo: until the plan is written and the
+// PC rebooted, keys still arrive as the old map (or no map) sends them.
+std::vector<Divert> InstalledDiverts();
+
 bool ScancodeMapIsCurrent(const ScancodeMapPlan& plan);
 
 // Writes or deletes HKLM\...\Keyboard Layout\Scancode Map through an elevated
