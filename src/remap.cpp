@@ -448,13 +448,21 @@ void ReloadConfig()
     for (int i = 0; i < kKeySlots; ++i) {
         g_base[i] = g_config.base[i];
         g_nav[i] = g_config.nav[i];
-        g_alias[i] = kNoKey;
     }
     g_chords = g_config.chords;
-    const ScancodeMapPlan plan = BuildScancodeMap(g_config);
     ReleaseSRWLockShared(&g_settingsLock);
 
-    for (const Divert& d : plan.diverts)
+    // Aliases follow the map the kernel is running, not the one the config
+    // wants: aliasing a divert that is not in yet mistakes a key for another
+    // (an incoming Right Win taken for the key meant to become it, while the
+    // physical right Win, not yet diverted, is still the one sending it).
+    // The kernel reads the map at boot, so it is read once here too — a map
+    // written from Settings changes the registry but not the keys until the
+    // reboot.
+    static const std::vector<Divert> inEffect = InstalledDiverts();
+    for (int i = 0; i < kKeySlots; ++i)
+        g_alias[i] = kNoKey;
+    for (const Divert& d : inEffect)
         g_alias[KeySlot(d.to)] = d.from;
 }
 

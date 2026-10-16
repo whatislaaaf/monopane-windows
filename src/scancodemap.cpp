@@ -114,12 +114,6 @@ ScancodeMapPlan BuildScancodeMap(const Config& cfg)
         plan.overflow = true;
     }
 
-    // The hook aliases every diverted scancode back to the key it came from,
-    // the Windows-key one included: once the map is in, the key given that role
-    // arrives as Right Win, and without the alias it would be looked up as the
-    // physical Right Win - which, diverted, is bound to something else.
-    plan.diverts = entries;
-
     plan.blob.reserve(16 + 4 * entries.size());
     AppendDword(plan.blob, 0); // version
     AppendDword(plan.blob, 0); // flags
@@ -189,6 +183,28 @@ bool ReadCurrentScancodeMap(std::vector<BYTE>& out)
     }
     RegCloseKey(key);
     return found;
+}
+
+std::vector<Divert> InstalledDiverts()
+{
+    std::vector<Divert> out;
+    std::vector<BYTE> blob;
+    if (!ReadCurrentScancodeMap(blob) || blob.size() < 16)
+        return out;
+    // The entry count includes the terminator; see BuildScancodeMap for the
+    // layout of an entry.
+    const DWORD count = ReadDword(blob, 8);
+    for (DWORD i = 0; i + 1 < count && 12 + 4 * (i + 1) <= blob.size(); ++i) {
+        const DWORD e = ReadDword(blob, 12 + 4 * i);
+        const KeyId to = static_cast<KeyId>(e & 0xFFFF);
+        const KeyId from = static_cast<KeyId>(e >> 16);
+        // Only the app's own kind of divert. A spare or Right Win can only
+        // have come from a key we know of; anything else a foreign map does
+        // lands on a real key, and aliasing that would hijack the real one.
+        if (from != kNoKey && AllowedDestination(to))
+            out.push_back({ from, to });
+    }
+    return out;
 }
 
 bool ScancodeMapIsCurrent(const ScancodeMapPlan& plan)
