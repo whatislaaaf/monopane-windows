@@ -284,10 +284,10 @@ constexpr UINT kCaptureTimeoutMs = 15000;
 constexpr UINT kMenuPressKey = 1;
 constexpr UINT kMenuLayer = 2;
 constexpr UINT kMenuWinKey = 3;
-constexpr UINT kMenuCtrl = 4;
 constexpr UINT kMenuDesktopPrev = 5;
 constexpr UINT kMenuDesktopNext = 6;
 constexpr UINT kMenuClear = 7;
+constexpr UINT kMenuSwitcher = 8;
 
 struct KbState {
     Config* cfg = nullptr;
@@ -313,13 +313,13 @@ KbState* State(HWND hwnd)
 // The picker follows the layout of the config being edited, which is not the
 // live one while the dialog is open.
 // Roles change how the hook behaves; a plain Action::Key only changes which
-// key arrives. Only a role can drive the Mac cmd+arrow chords or the layer.
+// key arrives. Only a role can drive the layer or the switcher.
 bool BindIsRole(const Bind& b)
 {
     switch (b.action) {
     case Action::Layer:
     case Action::WinKey:
-    case Action::CtrlSwap:
+    case Action::Switcher:
     case Action::DesktopPrev:
     case Action::DesktopNext:
         return true;
@@ -433,18 +433,18 @@ void SetStatusForSelection(KbState* st)
                  (bind ? DescribeBind(*bind) : L"unbound");
     if (!bind)
         return;
-    // Spell the roles out — which one you picked is the difference between the
-    // Mac chords working and quietly doing nothing.
+    // Spell the roles out — a role does something no plain remap can, and the
+    // name alone does not say what.
     switch (bind->action) {
     case Action::Layer:
         st->status += L" — hold it to reach the nav layer; a lone tap does nothing.";
         break;
-    case Action::CtrlSwap:
-        st->status += L" — sends Ctrl, and makes layer+arrows jump to line and "
-                      L"document ends the way Mac cmd does.";
-        break;
     case Action::WinKey:
         st->status += L" — the real Windows key (needs the kernel Scancode Map).";
+        break;
+    case Action::Switcher:
+        st->status += L" — sends nothing on its own; hold it and press Tab for the "
+                      L"switcher.";
         break;
     case Action::DesktopPrev:
     case Action::DesktopNext:
@@ -508,7 +508,7 @@ void ShowRoleMenu(HWND hwnd, KbState* st, POINT screenPt)
     if (st->view == 0) {
         AppendMenuW(menu, MF_STRING, kMenuLayer, L"Hold for nav layer");
         AppendMenuW(menu, MF_STRING, kMenuWinKey, L"Windows key");
-        AppendMenuW(menu, MF_STRING, kMenuCtrl, L"Ctrl (Mac cmd)");
+        AppendMenuW(menu, MF_STRING, kMenuSwitcher, L"Switcher key only");
     } else {
         AppendMenuW(menu, MF_STRING, kMenuDesktopPrev, L"Previous virtual desktop");
         AppendMenuW(menu, MF_STRING, kMenuDesktopNext, L"Next virtual desktop");
@@ -525,7 +525,7 @@ void ShowRoleMenu(HWND hwnd, KbState* st, POINT screenPt)
     case kMenuPressKey:     BeginCapture(hwnd, st); return;
     case kMenuLayer:        bind.action = Action::Layer; break;
     case kMenuWinKey:       bind.action = Action::WinKey; break;
-    case kMenuCtrl:         bind.action = Action::CtrlSwap; break;
+    case kMenuSwitcher:     bind.action = Action::Switcher; break;
     case kMenuDesktopPrev:  bind.action = Action::DesktopPrev; break;
     case kMenuDesktopNext:  bind.action = Action::DesktopNext; break;
     case kMenuClear:        break; // default-constructed Bind is Action::None
@@ -641,8 +641,8 @@ void PaintBoard(HWND hwnd, HDC target)
             br.top = kr.top + (kr.bottom - kr.top) / 2;
             br.bottom -= max(1, static_cast<int>(4 * scale));
             // A role and a plain key remap read identically otherwise —
-            // "Right Ctrl" and "Ctrl (Mac cmd)" look like the same kind of
-            // thing but behave nothing alike, so roles get a marker.
+            // "Right Win" and "Windows key" look like the same kind of thing
+            // but behave nothing alike, so roles get a marker.
             std::wstring label = BindIsRole(*bind) ? L"\x25C6 " + DescribeBind(*bind)
                                                    : DescribeBind(*bind);
             DrawTextW(dc, label.c_str(), -1, &br,
@@ -824,7 +824,7 @@ std::wstring DescribeBind(const Bind& bind)
     case Action::Key:         return KeyName(bind.target);
     case Action::Layer:       return L"nav layer";
     case Action::WinKey:      return L"Windows key";
-    case Action::CtrlSwap:    return L"Ctrl (Mac cmd)";
+    case Action::Switcher:    return L"switcher key";
     case Action::DesktopPrev: return L"prev desktop";
     case Action::DesktopNext: return L"next desktop";
     case Action::None:        break;

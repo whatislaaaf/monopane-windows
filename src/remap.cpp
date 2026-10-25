@@ -31,14 +31,13 @@ constexpr KeyId kSwallowUpOnly = 0xFFFF; // keyup consumed, nothing sent
 // Scancodes the chord helpers need by name.
 constexpr KeyId kScLCtrl = 0x1D;
 constexpr KeyId kScLAlt = 0x38;
+constexpr KeyId kScCapsLock = 0x3A;
 constexpr KeyId kScRAlt = 0xE038;
 constexpr KeyId kScSpace = 0x39;
 constexpr KeyId kScLeft = 0xE04B;
 constexpr KeyId kScRight = 0xE04D;
 constexpr KeyId kScUp = 0xE048;
 constexpr KeyId kScDown = 0xE050;
-constexpr KeyId kScHome = 0xE047;
-constexpr KeyId kScEnd = 0xE04F;
 
 // The fake left-ctrl that AltGr layouts emit alongside every right alt.
 constexpr DWORD kAltGrFillerScan = 0x21D;
@@ -61,7 +60,7 @@ KeyOrigin g_physDown[kKeySlots] = {};
 int g_physCount = 0;
 
 int g_layerHeld = 0;         // number of held layer keys
-bool g_ctrlSwapDown = false; // a key acting as Ctrl (Mac cmd) is held
+int g_switcherHeld = 0;      // number of held switcher keys
 bool g_altChordUsed = false; // an alt-masked chord ran; mask the coming alt-up
 // Per physical key: what we sent on keydown, so the matching keyup is
 // translated even if the layer key was released first.
@@ -108,27 +107,25 @@ bool AltHeld()
     return false;
 }
 
-// Send one tap of `id`, optionally wrapped in Ctrl, while temporarily lifting
-// held Alt (and/or the Ctrl coming from the Mac-cmd remap) so the app on the
-// receiving end sees exactly the Mac-style editing chord and nothing else.
-void SendNavChord(KeyId id, bool withCtrl, bool maskAlt, bool maskCtrl)
+// Send one tap of `id` wrapped in Ctrl, while temporarily lifting held Alt so
+// the app on the receiving end sees exactly the Mac-style editing chord and
+// nothing else.
+void SendNavChord(KeyId id)
 {
-    INPUT in[10];
+    INPUT in[8];
     int n = 0;
     auto add = [&](KeyId key, bool down) { FillKeyInput(in[n++], key, down); };
-    const bool altL = maskAlt && (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0;
-    const bool altR = maskAlt && (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
+    const bool altL = (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0;
+    const bool altR = (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
     // Ctrl goes down before any alt-up so the release cannot focus a menu bar.
-    if (withCtrl) add(kScLCtrl, true);
+    add(kScLCtrl, true);
     if (altL) add(kScLAlt, false);
     if (altR) add(kScRAlt, false);
-    if (maskCtrl) add(kScLCtrl, false);
     add(id, true);
     add(id, false);
-    if (maskCtrl) add(kScLCtrl, true);
     if (altR) add(kScRAlt, true);
     if (altL) add(kScLAlt, true);
-    if (withCtrl) add(kScLCtrl, false);
+    add(kScLCtrl, false);
     SendInput(n, in, sizeof(INPUT));
     if (altL || altR)
         g_altChordUsed = true;
@@ -142,7 +139,6 @@ KeyId EffectiveDown(KeyId physical)
     switch (b.action) {
     case Action::None:     return physical;
     case Action::Key:      return b.target;
-    case Action::CtrlSwap: return kScLCtrl;
     default:               return kNoKey; // layer/win keys hold nothing
     }
 }
@@ -212,13 +208,26 @@ void ReleaseTranslatedKeys()
         }
     }
     g_layerHeld = 0;
+    g_switcherHeld = 0;
     for (int slot = 0; slot < kKeySlots; ++slot)
         g_physDown[slot] = KeyOrigin::Any;
     g_physCount = 0;
-    if (g_ctrlSwapDown) {
-        SendKey(kScLCtrl, false); // release the Ctrl held by the Mac-cmd remap
-        g_ctrlSwapDown = false;
-    }
+}
+
+// A remapped Caps Lock can no longer turn Caps Lock off, so a lock switched on
+// while the key map was not running — paused for a game, or before Monopane
+// started at logon — would stay on for good. Whenever the key map takes over
+// again, a lock it cannot reach is put back off.
+void ClearUnreachableCapsLock()
+{
+    if (g_base[KeySlot(kScCapsLock)].action == Action::None)
+        return;
+    if (!(GetKeyState(VK_CAPITAL) & 1))
+        return;
+    INPUT in[2] = {};
+    FillKeyInput(in[0], kScCapsLock, true);
+    FillKeyInput(in[1], kScCapsLock, false);
+    SendInput(2, in, sizeof(INPUT));
 }
 
 bool IsHorizontalArrow(KeyId id) { return id == kScLeft || id == kScRight; }
@@ -353,14 +362,24 @@ bool HandlePhysicalKey(const KBDLLHOOKSTRUCT& k, bool down)
                 --g_layerHeld;
         }
         return true; // swallowed, so a lone tap does nothing
-    case Action::CtrlSwap:
-        g_ctrlSwapDown = down;
-        SendKey(kScLCtrl, down);
-        return true;
     case Action::WinKey:
         // The Scancode Map already turned this into a real Windows key; the
         // hook must keep its hands off it.
         return false;
+    case Action::Switcher:
+        // Nothing reaches the app — not Win, not the spare the Scancode Map
+        // diverted it onto. The hook asks SwitcherHeld() when Tab comes.
+        if (down) {
+            if (!g_translated[slot]) {
+                ++g_switcherHeld;
+                g_translated[slot] = kSwallowUpOnly;
+            }
+        } else if (g_translated[slot]) {
+            g_translated[slot] = 0;
+            if (g_switcherHeld > 0)
+                --g_switcherHeld;
+        }
+        return true;
     default:
         break;
     }
@@ -411,19 +430,10 @@ bool HandlePhysicalKey(const KBDLLHOOKSTRUCT& k, bool down)
         const KeyId target = active.target;
         const bool horizontal = IsHorizontalArrow(target);
         const bool vertical = IsVerticalArrow(target);
-        if ((horizontal || vertical) && g_ctrlSwapDown) {
-            // Mac cmd+arrow: left/right = line start/end, up/down = document
-            // start/end. The remapped Ctrl stays down for up/down (making
-            // Ctrl+Home/End) but is masked for left/right.
-            const KeyId dest = (target == kScLeft || target == kScUp) ? kScHome : kScEnd;
-            SendNavChord(dest, false, false, horizontal);
-            g_translated[slot] = kSwallowUpOnly;
-            return true;
-        }
         if ((horizontal || vertical) && AltHeld()) {
             // Mac option+arrow: word jump (left/right), paragraph-ish
             // (up/down) — Windows spells both as Ctrl+arrow.
-            SendNavChord(target, true, true, false);
+            SendNavChord(target);
             g_translated[slot] = kSwallowUpOnly;
             return true;
         }
@@ -464,6 +474,13 @@ void ReloadConfig()
         g_alias[i] = kNoKey;
     for (const Divert& d : inEffect)
         g_alias[KeySlot(d.to)] = d.from;
+
+    ClearUnreachableCapsLock();
+}
+
+bool SwitcherHeld()
+{
+    return g_switcherHeld > 0;
 }
 
 void SetPaused(bool paused)
@@ -473,6 +490,8 @@ void SetPaused(bool paused)
     g_paused = paused;
     if (paused)
         ReleaseTranslatedKeys();
+    else
+        ClearUnreachableCapsLock();
 }
 
 bool Paused()

@@ -63,7 +63,7 @@ bool ParseAction(const std::string& v, Bind& out)
     if (v == "none")         { out = Bind(); return true; }
     if (v == "layer")        { out.action = Action::Layer;       out.target = kNoKey; return true; }
     if (v == "winkey")       { out.action = Action::WinKey;      out.target = kNoKey; return true; }
-    if (v == "ctrl")         { out.action = Action::CtrlSwap;    out.target = kNoKey; return true; }
+    if (v == "switcher")     { out.action = Action::Switcher;    out.target = kNoKey; return true; }
     if (v == "desktop:prev") { out.action = Action::DesktopPrev; out.target = kNoKey; return true; }
     if (v == "desktop:next") { out.action = Action::DesktopNext; out.target = kNoKey; return true; }
     if (v.size() > 4 && v.compare(0, 4, "key:") == 0) {
@@ -93,7 +93,7 @@ std::string FormatAction(const Bind& b)
     case Action::Key:         return "key:" + FormatKeyId(b.target);
     case Action::Layer:       return "layer";
     case Action::WinKey:      return "winkey";
-    case Action::CtrlSwap:    return "ctrl";
+    case Action::Switcher:    return "switcher";
     case Action::DesktopPrev: return "desktop:prev";
     case Action::DesktopNext: return "desktop:next";
     case Action::None:        break;
@@ -144,29 +144,15 @@ ChordBinding StartMenuChord()
     return b;
 }
 
-// Earlier builds had two booleans instead of a chord list. Ctrl+Space becomes
-// an explicit *left* Ctrl chord — the old check merged both Ctrls, and left is
-// the one worth keeping. The language switcher hung off whichever key held the
-// Ctrl (Mac cmd) role, so it can only be rebuilt when such a key exists.
-void SynthesizeLegacyChords(Config& cfg, bool ctrlSpaceStart, bool cmdSpaceLang)
+// Earlier builds had booleans instead of a chord list. Ctrl+Space becomes an
+// explicit *left* Ctrl chord — the old check merged both Ctrls, and left is the
+// one worth keeping. The old language switcher hung off a cmd role that no
+// longer exists, so it is not carried over.
+void SynthesizeLegacyChords(Config& cfg, bool ctrlSpaceStart)
 {
     cfg.chords.clear();
     if (ctrlSpaceStart)
         cfg.chords.push_back(StartMenuChord());
-    if (!cmdSpaceLang)
-        return;
-    for (int slot = 0; slot < kKeySlots; ++slot) {
-        if (cfg.base[slot].action != Action::CtrlSwap)
-            continue;
-        ChordBinding b;
-        b.action = ChordAction::InputLanguage;
-        b.from.mods[0] = static_cast<KeyId>((slot & 0x100) ? (0xE000 | (slot & 0xFF))
-                                                           : (slot & 0xFF));
-        b.from.modCount = 1;
-        b.from.trigger = 0x39;
-        cfg.chords.push_back(b);
-        return;
-    }
 }
 
 // Carries the pre-1.1 HKCU settings into the file-based config on first run.
@@ -180,8 +166,7 @@ void MigrateLegacySettings(Config& cfg)
         return;
     if (!LegacyBool(key, L"CapsAsBackspace", true))
         cfg.base[KeySlot(0x3A)] = Bind();
-    SynthesizeLegacyChords(cfg, LegacyBool(key, L"CtrlSpaceStart", true),
-                           LegacyBool(key, L"CmdSpaceLang", true));
+    SynthesizeLegacyChords(cfg, LegacyBool(key, L"CtrlSpaceStart", true));
     RegCloseKey(key);
 }
 
@@ -263,12 +248,10 @@ void LoadConfig()
     enum class Section { None, Options, Base, Nav, Chords };
     Section section = Section::None;
 
-    // A file predating [chords] still carries the two booleans; they are
-    // turned into chords once the whole file is read, when the base table is
-    // known and the Ctrl-role key can be found.
+    // A file predating [chords] still carries the booleans; they are turned
+    // into chords once the whole file is read.
     bool sawChordsSection = false;
     bool legacyCtrlSpace = true;
-    bool legacyCmdSpace = true;
 
     size_t pos = 0;
     while (pos < text.size()) {
@@ -339,8 +322,6 @@ void LoadConfig()
             const bool on = value != "0" && value != "false";
             if (name == "ctrl_space_start")
                 legacyCtrlSpace = on;
-            else if (name == "cmd_space_lang")
-                legacyCmdSpace = on;
             else if (name == "layout")
                 g_config.layout = value == "ansi" ? BoardLayout::Ansi
                                 : value == "iso"  ? BoardLayout::Iso
@@ -365,7 +346,7 @@ void LoadConfig()
     }
 
     if (!sawChordsSection)
-        SynthesizeLegacyChords(g_config, legacyCtrlSpace, legacyCmdSpace);
+        SynthesizeLegacyChords(g_config, legacyCtrlSpace);
 }
 
 bool SaveConfig()
@@ -378,7 +359,7 @@ bool SaveConfig()
     out += "#\r\n";
     out += "# Keys are set-1 scancodes in hex; E0xx is an extended key\r\n";
     out += "# (E01D = right ctrl). Actions: key:<scancode>, layer, winkey,\r\n";
-    out += "# ctrl, desktop:prev, desktop:next, none.\r\n";
+    out += "# switcher, desktop:prev, desktop:next, none.\r\n";
     out += "#\r\n";
     out += "# Edited by hand? Restart Monopane to reload it.\r\n";
 

@@ -25,9 +25,9 @@ enum class Action : uint8_t {
     Key,          // sends another key (see Bind::target)
     Layer,        // hold to activate the nav layer; swallowed when tapped alone
     WinKey,       // acts as a real Windows key
-    CtrlSwap,     // acts as Left Ctrl, and gates the Mac cmd+arrow chords
     DesktopPrev,  // Ctrl+Win+Left
     DesktopNext,  // Ctrl+Win+Right
+    Switcher,     // sends nothing; held only for the switcher's hotkey
 };
 
 struct Bind {
