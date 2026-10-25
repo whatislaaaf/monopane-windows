@@ -65,15 +65,12 @@ actions on offer there:
 | Send another chord | Rewrites one chord as another |
 
 Arrow targets in the nav layer understand Mac-style modifiers, translated to
-the Windows equivalents (held Alt/Ctrl are masked as needed so apps see only
-the chord):
+the Windows equivalents (held Alt is masked so apps see only the chord):
 
 | Combo | Sends | Mac equivalent |
 | --- | --- | --- |
 | Alt + `j`/`l` | Ctrl+Left/Right — word jump | option+←/→ |
 | Alt + `i`/`k` | Ctrl+Up/Down | option+↑/↓ |
-| Ctrl-role key + `j`/`l` | Home / End — line start/end | cmd+←/→ |
-| Ctrl-role key + `i`/`k` | Ctrl+Home/End — document start/end | cmd+↑/↓ |
 
 Shift passes through everywhere, so any of the above becomes a selection
 (layer+Shift+`j` = select left), matching Karabiner's `"optional": ["any"]`.
@@ -114,16 +111,27 @@ mapping. It edits a copy of the config; nothing is applied until OK.
   the capture releases itself after 15 seconds or on any click, so a picker
   waiting for input can never leave the keyboard swallowed.
 - **Right-click a key** for the roles that aren't "send another key": *hold for
-  nav layer*, *Windows key*, *Ctrl (Mac cmd)*, the virtual-desktop switches, and
-  *Clear*.
+  nav layer*, *Windows key*, *Switcher key only*, the virtual-desktop switches,
+  and *Clear*.
 - **Base layer / Nav layer** switches which of the two tables you're editing —
   `j` sends `j` on the base layer and Left on the nav layer.
 - Pointing a key at itself clears it.
 
 A key holding a **role** is marked with a ◆. The distinction matters: a key
-*sending* Right Ctrl gives you Ctrl for copy/paste, but only the `Ctrl (Mac cmd)`
-**role** drives the layer+arrow line and document jumps, because by the time a
-plain remap reaches an app the hook has no idea the Ctrl came from a remap.
+*sending* Right Win is just another key, but the *Windows key* role is a real
+Windows key put there by the kernel Scancode Map.
+
+*Switcher key only* is for a key that should open the switcher and do nothing
+else: it sends nothing to apps — not Ctrl, not Win — and exists only to be
+held for the switcher: hold it and press Tab (Shift+Tab cycles backwards). No
+hotkey needs capturing for it; the Switcher tab's hotkey keeps working
+alongside. On a Win key the Scancode Map diverts it, so it cannot open the
+Start menu or lock the PC either, and games see nothing from it.
+
+While Caps Lock is remapped it can no longer switch Caps Lock off, so if the
+lock comes on while the key map is not running — paused, or before Monopane
+starts at logon — Monopane turns it back off when it starts and when it
+resumes.
 
 `Fn`, `PrtSc` and `Pause` are drawn but can't be bound. Fn is handled inside
 the keyboard's own firmware on most boards and never reaches Windows at all;
@@ -236,8 +244,10 @@ after 15 seconds, so it can never leave the keyboard swallowed.
 
 #### Opening the switcher
 
-Out of the box it is **Cmd+Tab**, where Cmd is whichever key the key map gives
-the *Ctrl (Mac cmd)* role.
+The simplest way is to give a key the *Switcher key only* role: that key plus
+Tab opens the switcher, with nothing to capture. The hotkey here works
+alongside it; out of the box it is a left Ctrl produced by the key map (a key
+remapped to send Ctrl) plus Tab.
 
 Two things make this more precise than a normal Windows hotkey, both courtesy
 of keychord (`external/keychord`):
@@ -353,7 +363,7 @@ desk through a KVM. Copy it to `~/.config/karabiner/karabiner.json`.
 | Caps Lock | Backspace | Backspace |
 | Left Ctrl | Left Alt | **Option** |
 | Win | Left Ctrl | **Control** |
-| Left Alt | Ctrl / Mac-cmd role | **Command** |
+| Left Alt | Left Ctrl | **Command** |
 | Right Alt | nav layer | nav layer |
 | Menu | Windows key | left alone — macOS has no counterpart |
 | Right Ctrl | Right Ctrl | Right Control |
@@ -376,9 +386,9 @@ The modifier swap lives in `complex_modifications` rather than
 `simple_modifications` deliberately: the Space chords have to see the swapped
 modifier, and keeping both in the same stage makes that unambiguous.
 
-The Mac-side editing chords need no rules — option+arrow for word jump and
-cmd+arrow for line and document ends are native to macOS. The key map has to
-synthesise them on Windows, which is why they exist there and not here.
+The Mac-side editing chords need no rules — option+arrow for word jump is
+native to macOS. The key map has to synthesise it on Windows, which is why it
+exists there and not here.
 
 No `devices` block, on purpose: through a KVM the keyboard often reports the
 switch's own vendor and product ids rather than the keyboard's, and those can

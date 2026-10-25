@@ -19,9 +19,10 @@ struct Settings {
 
 extern Settings g_settings;
 
-// The out-of-the-box hotkey: the left Ctrl the key map injects for the Ctrl
-// (Mac cmd) role, then Tab. The injected origin is what leaves a genuine
-// physical Ctrl+Tab alone, so in-app tab switching keeps working.
+// The out-of-the-box hotkey: a left Ctrl the key map injects (a key remapped
+// to send Ctrl), then Tab. The injected origin is what leaves a genuine
+// physical Ctrl+Tab alone, so in-app tab switching keeps working. A key with
+// the switcher role opens the switcher on Tab without any hotkey.
 void DefaultHotkey(keychord::KeyChord& out);
 
 // The out-of-the-box rotate hotkey: Ctrl+Alt+R, taken however the keys arrive,

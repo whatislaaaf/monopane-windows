@@ -4,7 +4,7 @@
 // The key map (remap.h, once MacKeys) sees every physical key first and
 // decides what it means; the switcher's hotkeys are matched against what
 // comes out of it. Press Cmd+Tab — Cmd being whichever key the map gives the
-// Ctrl (Mac cmd) role — to open the overlay, type a few letters to
+// switcher role — to open the overlay, type a few letters to
 // fuzzy-filter the open windows, press Enter to activate the selected one.
 // Esc dismisses.
 //
@@ -575,6 +575,15 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
             const keychord::KeyChord hotkey = g_settings.hotkey;
             const keychord::KeyChord rotate = g_settings.rotateHotkey;
             ReleaseSRWLockShared(&g_settingsLock);
+
+            // A key with the switcher role exists for this alone, so it needs
+            // no hotkey captured on it: Tab while it is held opens the switcher.
+            if (down && id == 0x0F && origin == keychord::KeyOrigin::Physical &&
+                remap::SwitcherHeld()) {
+                const WPARAM shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
+                PostMessageW(g_hwndOverlay, WM_APP_HOTKEY, shift, 0);
+                return 1;
+            }
 
             if (down && id == hotkey.trigger &&
                 (hotkey.triggerOrigin == keychord::KeyOrigin::Any ||

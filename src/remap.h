@@ -23,6 +23,10 @@ constexpr ULONG_PTR kInjectMarker = 0x4D4B5953; // "MKYS"
 // map. Returns true when the event was consumed and must not be passed on.
 bool HandlePhysicalKey(const KBDLLHOOKSTRUCT& k, bool down);
 
+// A key holding the switcher role is down. It is swallowed, so neither the OS
+// nor the hotkeys ever see it; Tab under it opens the switcher.
+bool SwitcherHeld();
+
 // Rebuilds the live tables from g_config (taking g_settingsLock shared),
 // releasing anything held under the old ones.
 void ReloadConfig();
