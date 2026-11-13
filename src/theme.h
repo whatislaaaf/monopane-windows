@@ -1,7 +1,12 @@
 #pragma once
 #include <windows.h>
 
-// The switcher's chrome.
+// The chrome the switcher and the launchpad share.
+//
+// They are one panel with two kinds of contents, and switching between them
+// should not look like moving between two different windows: same width, same
+// search box, in the same place on screen. What differs is only what hangs
+// below the search box — a list of windows, or a grid of apps.
 
 // Palette.
 constexpr COLORREF CLR_BG = RGB(30, 30, 30);
@@ -10,7 +15,9 @@ constexpr COLORREF CLR_SELECTION = RGB(0, 95, 184);
 constexpr COLORREF CLR_TEXT = RGB(242, 242, 242);
 constexpr COLORREF CLR_TEXT_DIM = RGB(170, 170, 170);
 
-// Base (96-dpi) metrics of the panel itself.
+// Base (96-dpi) metrics of the panel itself. The launchpad's grid is measured
+// out of the width rather than the other way round, so the two panels are the
+// same number of pixels wide at every DPI.
 constexpr int BASE_PANEL_WIDTH = 680;
 constexpr int BASE_SEARCH_H = 56;
 constexpr int BASE_PAD = 10;
@@ -22,9 +29,11 @@ constexpr int BASE_CORNER = 8;
 // Where to put the top of a panel whose search plate is `plate`, so that the
 // plate's middle lands on the middle of `work`.
 //
-// The panel anchors on the search box rather than on the frame, because the
+// Both overlays anchor on the search box rather than on the frame, because the
 // search box is the part that has to hold still: the frame is a different
-// height every time the list filters down.
+// height in each of them, and a different height again as a list filters down
+// or a grid grows. Anchoring the frame instead is what used to make the box
+// jump 76 pixels between the two.
 inline int PanelTop(const RECT& work, const RECT& plate)
 {
     return work.top + (work.bottom - work.top) / 2 - (plate.top + plate.bottom) / 2;

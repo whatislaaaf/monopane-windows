@@ -81,6 +81,7 @@ INT_PTR CALLBACK KeysTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
 constexpr UINT kMenuChordStart = 1;
 constexpr UINT kMenuChordLang = 2;
 constexpr UINT kMenuChordSend = 3;
+constexpr UINT kMenuChordLaunchpad = 4;
 
 void RefreshChordList(HWND dlg, KeysEdit* st)
 {
@@ -253,6 +254,7 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
                 return TRUE;
             }
             HMENU menu = CreatePopupMenu();
+            AppendMenuW(menu, MF_STRING, kMenuChordLaunchpad, L"Open the launchpad");
             AppendMenuW(menu, MF_STRING, kMenuChordStart, L"Open the Start menu");
             AppendMenuW(menu, MF_STRING, kMenuChordLang, L"Switch input language");
             AppendMenuW(menu, MF_STRING, kMenuChordSend, L"Send another chord\x2026");
@@ -264,9 +266,10 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
             if (!cmd)
                 return TRUE;
             ChordBinding binding;
-            binding.action = cmd == kMenuChordStart  ? ChordAction::StartMenu
-                             : cmd == kMenuChordLang ? ChordAction::InputLanguage
-                                                     : ChordAction::SendChord;
+            binding.action = cmd == kMenuChordLaunchpad ? ChordAction::Launchpad
+                             : cmd == kMenuChordStart   ? ChordAction::StartMenu
+                             : cmd == kMenuChordLang    ? ChordAction::InputLanguage
+                                                        : ChordAction::SendChord;
             st->work.chords.push_back(binding);
             StartChordCapture(dlg, st, static_cast<int>(st->work.chords.size()) - 1, 0, true);
             return TRUE;

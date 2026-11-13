@@ -15,6 +15,7 @@
 
 #include "remap.h"
 
+#include <atomic>
 #include <vector>
 
 #include "config.h"
@@ -44,6 +45,10 @@ constexpr DWORD kAltGrFillerScan = 0x21D;
 
 DWORD g_hookThreadId = 0;
 bool g_paused = false;
+
+// Where a launchpad chord is posted. Written by the UI thread, read here.
+std::atomic<HWND> g_launchpadTarget{ nullptr };
+std::atomic<UINT> g_launchpadMsg{ 0 };
 
 // Live copies of the config, so the hook never touches a table being edited.
 Bind g_base[kKeySlots];
@@ -280,6 +285,12 @@ void RunChord(const ChordBinding& binding)
     case ChordAction::StartMenu:     SendWinTap(false, binding.from); break;
     case ChordAction::InputLanguage: SendWinTap(true, binding.from); break;
     case ChordAction::SendChord:     SendOutputChord(binding.from, binding.to); break;
+    case ChordAction::Launchpad:
+        // Only a post: the panel is the UI thread's, and the hook must answer
+        // inside LowLevelHooksTimeout whatever opening it costs.
+        if (HWND target = g_launchpadTarget.load())
+            PostMessageW(target, g_launchpadMsg.load(), 0, 0);
+        break;
     case ChordAction::None:          break;
     }
 }
@@ -507,6 +518,12 @@ void ReleaseAll()
 void BindHookThread(DWORD threadId)
 {
     g_hookThreadId = threadId;
+}
+
+void SetLaunchpadTarget(HWND hwnd, UINT msg)
+{
+    g_launchpadMsg.store(msg);
+    g_launchpadTarget.store(hwnd);
 }
 
 void RequestReload()

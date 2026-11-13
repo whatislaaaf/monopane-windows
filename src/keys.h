@@ -50,6 +50,7 @@ enum class ChordAction : uint8_t {
     StartMenu,     // tap Win — the Spotlight stand-in
     InputLanguage, // Win+Space
     SendChord,     // send ChordBinding::to
+    Launchpad,     // open (or close) Monopane's launchpad
 };
 
 struct ChordBinding {
