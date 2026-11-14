@@ -39,8 +39,3 @@
 #define IDC_TXT_SCMAP           357
 #define IDC_BTN_SCMAP_RESET     358
 #define IDC_CMB_BOARD           359
-
-// The launchpad's "add an installed app" picker
-#define IDD_PICKER              360
-#define IDC_PICK_SEARCH         361
-#define IDC_PICK_LIST           362

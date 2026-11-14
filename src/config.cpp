@@ -133,12 +133,11 @@ bool LegacyBool(HKEY key, const wchar_t* name, bool fallback)
     return fallback;
 }
 
-// Left Ctrl + Space, the Spotlight position. Left Ctrl specifically, not either
-// Ctrl — chords match the physical key.
-ChordBinding LeftCtrlSpace(ChordAction action)
+// Left Ctrl specifically, not either Ctrl — chords match the physical key.
+ChordBinding StartMenuChord()
 {
     ChordBinding b;
-    b.action = action;
+    b.action = ChordAction::StartMenu;
     b.from.mods[0] = 0x1D;
     b.from.modCount = 1;
     b.from.trigger = 0x39;
@@ -153,7 +152,7 @@ void SynthesizeLegacyChords(Config& cfg, bool ctrlSpaceStart)
 {
     cfg.chords.clear();
     if (ctrlSpaceStart)
-        cfg.chords.push_back(LeftCtrlSpace(ChordAction::StartMenu));
+        cfg.chords.push_back(StartMenuChord());
 }
 
 // Carries the pre-1.1 HKCU settings into the file-based config on first run.
@@ -203,10 +202,9 @@ void ResetToDefaults(Config& cfg)
     SetNav(cfg, 0x16, Action::DesktopPrev);  // U
     SetNav(cfg, 0x18, Action::DesktopNext);  // O
 
-    // Left Ctrl+Space, the Spotlight position, opens the launchpad. The Start
-    // menu is a tap of Win away, and Add… puts it on any other chord.
+    // Left Ctrl+Space, the Spotlight position, opens the Start menu.
     cfg.chords.clear();
-    cfg.chords.push_back(LeftCtrlSpace(ChordAction::Launchpad));
+    cfg.chords.push_back(StartMenuChord());
 
     cfg.layout = BoardLayout::Auto;
     cfg.board = BoardShape::Full;
@@ -300,7 +298,6 @@ void LoadConfig()
             if (name == "start_menu")          binding.action = ChordAction::StartMenu;
             else if (name == "input_language") binding.action = ChordAction::InputLanguage;
             else if (name == "send")           binding.action = ChordAction::SendChord;
-            else if (name == "launchpad")      binding.action = ChordAction::Launchpad;
             else                               continue;
 
             std::string fromSpec = value;
@@ -404,7 +401,6 @@ bool SaveConfig()
             continue;
         std::string name = c.action == ChordAction::StartMenu       ? "start_menu"
                            : c.action == ChordAction::InputLanguage ? "input_language"
-                           : c.action == ChordAction::Launchpad     ? "launchpad"
                                                                     : "send";
         while (name.size() < 14)
             name += ' ';

@@ -860,7 +860,6 @@ std::wstring DescribeChordAction(const ChordBinding& b)
     case ChordAction::StartMenu:     return L"Start menu";
     case ChordAction::InputLanguage: return L"Switch input language";
     case ChordAction::SendChord:     return L"sends " + DescribeChord(b.to);
-    case ChordAction::Launchpad:     return L"Launchpad";
     case ChordAction::None:          break;
     }
     return L"nothing";

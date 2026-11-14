@@ -2,7 +2,7 @@
 #include <windows.h>
 
 // A rounded rectangle filled with `fill`, its corners anti-aliased against
-// `back` — the colour already behind it, which both overlays paint first.
+// `back` — the colour already behind it, which the overlay paints first.
 //
 // GDI's own RoundRect has no anti-aliasing, and a hard-edged corner is exactly
 // what gives away a panel whose window corners the compositor has rounded

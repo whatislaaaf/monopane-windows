@@ -11,8 +11,6 @@ add_executable(monopane WIN32
     src/settings.cpp
     src/aliases.cpp
     src/display.cpp
-    src/launchpad.cpp
-    src/launchpad_apps.cpp
     src/paint.cpp
     src/remap.cpp
     src/config.cpp
@@ -34,5 +32,4 @@ endif()
 
 target_link_libraries(monopane PRIVATE
     user32 gdi32 shell32 comctl32 dwmapi advapi32 ole32 version uxtheme
-    msimg32 comdlg32
 )
