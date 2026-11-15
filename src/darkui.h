@@ -17,12 +17,12 @@
 
 namespace dark {
 
-constexpr COLORREF kBg = CLR_BG;             // the dialog and the pages
-constexpr COLORREF kCard = CLR_SEARCH_BG;    // lists, combos, buttons at rest
+constexpr COLORREF kBg = RGB(30, 30, 30);    // the dialog and the pages
+constexpr COLORREF kCard = RGB(45, 45, 45);  // lists, combos, buttons at rest
 constexpr COLORREF kLine = RGB(70, 70, 70);  // borders and separators
-constexpr COLORREF kText = CLR_TEXT;
-constexpr COLORREF kDim = CLR_TEXT_DIM;
-constexpr COLORREF kAccent = CLR_SELECTION;
+constexpr COLORREF kText = RGB(242, 242, 242);
+constexpr COLORREF kDim = RGB(170, 170, 170);
+constexpr COLORREF kAccent = RGB(0, 95, 184);
 
 HBRUSH BgBrush();
 HBRUSH CardBrush();

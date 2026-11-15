@@ -84,7 +84,10 @@ UINT g_dpi = 96;
 HFONT g_fontApp = nullptr;
 HFONT g_fontTitle = nullptr;
 HFONT g_fontEdit = nullptr;
+HFONT g_fontSection = nullptr;  // the "Open windows" heading
+HFONT g_fontGlyph = nullptr;    // the magnifier in the search box
 HBRUSH g_brushSearchBg = nullptr;
+COLORREF g_accent = CLR_ACCENT_FALLBACK;
 int g_editLineH = 0;   // one line of g_fontEdit, for centring the search box
 NOTIFYICONDATAW g_trayIcon{};
 
@@ -117,25 +120,70 @@ bool MouseActuallyMoved(HWND hwnd, POINT client)
     return true;
 }
 
+bool FontInstalled(const wchar_t* face)
+{
+    LOGFONTW lf{};
+    lf.lfCharSet = DEFAULT_CHARSET;
+    wcscpy_s(lf.lfFaceName, face);
+    bool found = false;
+    HDC dc = GetDC(nullptr);
+    EnumFontFamiliesExW(
+        dc, &lf,
+        [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM found) -> int {
+            *reinterpret_cast<bool*>(found) = true;
+            return 0;
+        },
+        reinterpret_cast<LPARAM>(&found), 0);
+    ReleaseDC(nullptr, dc);
+    return found;
+}
+
+// The light shade of the user's accent colour, as Windows 11 draws it on dark
+// surfaces. The shell keeps the whole ramp in AccentPalette, lightest first.
+COLORREF ReadAccentLight()
+{
+    BYTE palette[32] = {};
+    DWORD size = sizeof(palette);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent",
+                     L"AccentPalette", RRF_RT_REG_BINARY, nullptr, palette, &size) ==
+            ERROR_SUCCESS &&
+        size >= 8)
+        return RGB(palette[4], palette[5], palette[6]);
+    return CLR_ACCENT_FALLBACK;
+}
+
 void CreateFonts()
 {
     if (g_fontApp) DeleteObject(g_fontApp);
     if (g_fontTitle) DeleteObject(g_fontTitle);
     if (g_fontEdit) DeleteObject(g_fontEdit);
+    if (g_fontSection) DeleteObject(g_fontSection);
+    if (g_fontGlyph) DeleteObject(g_fontGlyph);
+
+    // Windows 11's own type and icons, where they exist; on Windows 10 the
+    // faces they replaced.
+    static const bool variable = FontInstalled(L"Segoe UI Variable Text");
+    static const bool fluent = FontInstalled(L"Segoe Fluent Icons");
 
     LOGFONTW lf{};
     lf.lfQuality = CLEARTYPE_QUALITY;
-    wcscpy_s(lf.lfFaceName, L"Segoe UI");
+    wcscpy_s(lf.lfFaceName, variable ? L"Segoe UI Variable Text" : L"Segoe UI");
 
-    lf.lfHeight = -Scale(15);
+    lf.lfHeight = -Scale(14);
     lf.lfWeight = FW_SEMIBOLD;
     g_fontApp = CreateFontIndirectW(&lf);
+    g_fontSection = CreateFontIndirectW(&lf);
 
     lf.lfWeight = FW_NORMAL;
     g_fontTitle = CreateFontIndirectW(&lf);
 
-    lf.lfHeight = -Scale(17);
+    lf.lfHeight = -Scale(15);
     g_fontEdit = CreateFontIndirectW(&lf);
+
+    lf.lfHeight = -Scale(16);
+    wcscpy_s(lf.lfFaceName, fluent ? L"Segoe Fluent Icons" : L"Segoe MDL2 Assets");
+    g_fontGlyph = CreateFontIndirectW(&lf);
 
     // A single-line edit control draws its text at the top of its client area,
     // not down the middle of it, so the only way to have the text sit centred
@@ -154,11 +202,25 @@ void CreateFonts()
         SendMessageW(g_hwndEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g_fontEdit), TRUE);
 }
 
-// The plate the search box sits on.
+// The pill the search box is drawn as, centred in the header band.
 RECT SearchPlateRect()
 {
-    const int pad = Scale(BASE_PAD);
-    return RECT{ pad, pad, Scale(BASE_PANEL_WIDTH) - pad, Scale(BASE_SEARCH_H) - Scale(4) };
+    const int inset = Scale(BASE_SEARCH_INSET);
+    const int boxH = Scale(BASE_SEARCH_BOX_H);
+    const int top = (Scale(BASE_HEADER_H) - boxH) / 2;
+    return RECT{ inset, top, Scale(BASE_PANEL_WIDTH) - inset, top + boxH };
+}
+
+// Where the list starts: below the header band and the section heading.
+int ListTop()
+{
+    return Scale(BASE_HEADER_H) + Scale(BASE_SECTION_H);
+}
+
+// Where the edit control's text starts: past the magnifier.
+int SearchTextLeft()
+{
+    return SearchPlateRect().left + Scale(40);
 }
 
 // ---------------------------------------------------------------------------
@@ -221,9 +283,9 @@ void EnsureSelectionVisible()
 void LayoutOverlay(bool reposition)
 {
     const int width = Scale(BASE_PANEL_WIDTH);
-    const int searchH = Scale(BASE_SEARCH_H);
+    const int listTop = ListTop();
     const int rowH = Scale(BASE_ROW_H);
-    const int pad = Scale(BASE_PAD);
+    const int bottomPad = Scale(BASE_BOTTOM_PAD);
 
     // On the monitor the cursor is on when opening; on the one it is already
     // on when the list is merely re-filtering.
@@ -242,22 +304,24 @@ void LayoutOverlay(bool reposition)
     // below it. The top is fixed whatever the list is doing, so nothing creeps
     // up the screen as a search narrows it.
     const int top = PanelTop(mi.rcWork, SearchPlateRect());
-    g_visibleRows = std::min(RowsThatFit(mi.rcWork, top, searchH, pad, rowH), MAX_VISIBLE_ROWS);
+    g_visibleRows =
+        std::min(RowsThatFit(mi.rcWork, top, listTop, bottomPad, rowH), MAX_VISIBLE_ROWS);
 
     int rows = std::min(static_cast<int>(g_filtered.size()), g_visibleRows);
     if (rows == 0)
         rows = 1;  // room for the "no matching windows" row
-    const int height = searchH + rows * rowH + pad;
+    const int height = listTop + rows * rowH + bottomPad;
 
     const int x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - width) / 2;
     SetWindowPos(g_hwndOverlay, HWND_TOPMOST, x, top, width, height, SWP_NOACTIVATE);
 
-    // One line tall, centred in the plate: see CreateFonts.
+    // One line tall, centred in the pill: see CreateFonts. It stops short of
+    // the pill's rounded right end.
     const RECT plate = SearchPlateRect();
     const int editH = g_editLineH + Scale(2);
-    MoveWindow(g_hwndEdit, plate.left + Scale(10),
-               plate.top + ((plate.bottom - plate.top) - editH) / 2,
-               (plate.right - Scale(10)) - (plate.left + Scale(10)), editH, TRUE);
+    const int editLeft = SearchTextLeft();
+    MoveWindow(g_hwndEdit, editLeft, plate.top + ((plate.bottom - plate.top) - editH) / 2,
+               (plate.right - Scale(18)) - editLeft, editH, TRUE);
     InvalidateRect(g_hwndOverlay, nullptr, TRUE);
 }
 
@@ -272,6 +336,7 @@ void HideOverlay()
 void ShowOverlay()
 {
     SetIconSizePx(Scale(BASE_ICON));
+    g_accent = ReadAccentLight();  // the user may have changed it since last time
     g_windows = EnumerateAltTabWindows();
     SetWindowTextW(g_hwndEdit, L"");
     ApplyFilter();
@@ -355,29 +420,58 @@ void PaintOverlay(HDC hdc, const RECT& client)
 {
     const int width = client.right;
     const int height = client.bottom;
-    const int searchH = Scale(BASE_SEARCH_H);
+    const int headerH = Scale(BASE_HEADER_H);
+    const int listTop = ListTop();
     const int rowH = Scale(BASE_ROW_H);
-    const int pad = Scale(BASE_PAD);
+    const int rowInset = Scale(BASE_ROW_INSET);
+    const int contentLeft = rowInset + Scale(16);  // icons and the heading line up here
     const int iconPx = Scale(BASE_ICON);
 
     HDC mem = CreateCompatibleDC(hdc);
     HBITMAP bitmap = CreateCompatibleBitmap(hdc, width, height);
     HGDIOBJ oldBitmap = SelectObject(mem, bitmap);
 
-    // Background
-    HBRUSH bgBrush = CreateSolidBrush(CLR_BG);
-    RECT full{ 0, 0, width, height };
-    FillRect(mem, &full, bgBrush);
-    DeleteObject(bgBrush);
+    // The header band, the hairline under it, and the body.
+    const auto fill = [mem](const RECT& rc, COLORREF colour) {
+        HBRUSH brush = CreateSolidBrush(colour);
+        FillRect(mem, &rc, brush);
+        DeleteObject(brush);
+    };
+    fill(RECT{ 0, 0, width, headerH - 1 }, CLR_HEADER_BG);
+    fill(RECT{ 0, headerH - 1, width, headerH }, CLR_DIVIDER);
+    fill(RECT{ 0, headerH, width, height }, CLR_BG);
 
-    // Search box background (the edit control paints itself on top), rounded
-    // to the same radius the compositor rounds the window itself by.
-    FillRoundRectAA(mem, SearchPlateRect(), Scale(BASE_CORNER), CLR_SEARCH_BG, CLR_BG);
+    // The search box: a pill with a 1px outline, drawn as the outline's pill
+    // with the fill's pill a pixel inside it. The edit control paints itself
+    // on top, in the fill colour.
+    const RECT plate = SearchPlateRect();
+    const int plateR = (plate.bottom - plate.top) / 2;
+    FillRoundRectAA(mem, plate, plateR, CLR_SEARCH_BORDER, CLR_HEADER_BG);
+    RECT plateInner = plate;
+    InflateRect(&plateInner, -1, -1);
+    FillRoundRectAA(mem, plateInner, plateR - 1, CLR_SEARCH_BG, CLR_SEARCH_BORDER);
 
     SetBkMode(mem, TRANSPARENT);
 
+    // The magnifier, in the accent colour, left of where the typing starts.
+    {
+        RECT glyph{ plate.left + Scale(10), plate.top, SearchTextLeft() - Scale(6), plate.bottom };
+        SelectObject(mem, g_fontGlyph);
+        SetTextColor(mem, g_accent);
+        DrawTextW(mem, L"\xE721", -1, &glyph, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+
+    // The section heading, as the Start menu heads its grid with "Pinned".
+    {
+        RECT heading{ contentLeft, headerH, width - contentLeft, listTop };
+        SelectObject(mem, g_fontSection);
+        SetTextColor(mem, CLR_TEXT);
+        DrawTextW(mem, L"Open windows", -1, &heading,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+
     if (g_filtered.empty()) {
-        RECT row{ pad, searchH, width - pad, searchH + rowH };
+        RECT row{ rowInset, listTop, width - rowInset, listTop + rowH };
         SelectObject(mem, g_fontTitle);
         SetTextColor(mem, CLR_TEXT_DIM);
         DrawTextW(mem, L"No matching windows", -1, &row,
@@ -387,20 +481,26 @@ void PaintOverlay(HDC hdc, const RECT& client)
     const int last = std::min(static_cast<int>(g_filtered.size()), g_scrollTop + g_visibleRows);
     for (int i = g_scrollTop; i < last; ++i) {
         const WindowInfo& win = g_windows[g_filtered[i]];
-        const int y = searchH + (i - g_scrollTop) * rowH;
+        const int y = listTop + (i - g_scrollTop) * rowH;
 
+        // Windows 11's list selection: a faint wash with a short accent pill
+        // at its left edge, rather than a block of solid colour.
         if (i == g_selected) {
-            const RECT sel{ pad, y + Scale(2), width - pad, y + rowH - Scale(2) };
-            FillRoundRectAA(mem, sel, Scale(6), CLR_SELECTION, CLR_BG);
+            const RECT sel{ rowInset, y + Scale(2), width - rowInset, y + rowH - Scale(2) };
+            FillRoundRectAA(mem, sel, Scale(BASE_ROW_RADIUS), CLR_ROW_SELECTED, CLR_BG);
+            const int pillH = Scale(16);
+            const int pillTop = y + (rowH - pillH) / 2;
+            const RECT pill{ sel.left, pillTop, sel.left + Scale(3), pillTop + pillH };
+            FillRoundRectAA(mem, pill, (pill.right - pill.left) / 2, g_accent, CLR_ROW_SELECTED);
         }
 
-        int x = pad * 2;
+        int x = contentLeft;
         if (win.icon) {
             DrawIconEx(mem, x, y + (rowH - iconPx) / 2, win.icon, iconPx, iconPx, 0, nullptr, DI_NORMAL);
         }
-        x += iconPx + pad;
+        x += iconPx + Scale(12);
 
-        const int textRight = width - pad * 2;
+        const int textRight = width - contentLeft;
         RECT textRect{ x, y, textRight, y + rowH };
 
         SelectObject(mem, g_fontApp);
@@ -415,7 +515,7 @@ void PaintOverlay(HDC hdc, const RECT& client)
 
         if (textRect.left < textRect.right) {
             SelectObject(mem, g_fontTitle);
-            SetTextColor(mem, i == g_selected ? RGB(220, 230, 244) : CLR_TEXT_DIM);
+            SetTextColor(mem, CLR_TEXT_DIM);
             const std::wstring title = L"— " + win.title;
             DrawTextW(mem, title.c_str(), -1, &textRect,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -430,11 +530,11 @@ void PaintOverlay(HDC hdc, const RECT& client)
 
 int RowFromPoint(int yPos)
 {
-    const int searchH = Scale(BASE_SEARCH_H);
+    const int listTop = ListTop();
     const int rowH = Scale(BASE_ROW_H);
-    if (yPos < searchH)
+    if (yPos < listTop)
         return -1;
-    const int row = g_scrollTop + (yPos - searchH) / rowH;
+    const int row = g_scrollTop + (yPos - listTop) / rowH;
     if (row >= static_cast<int>(g_filtered.size()) || row >= g_scrollTop + g_visibleRows)
         return -1;
     return row;
@@ -485,6 +585,28 @@ LRESULT CALLBACK EditSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         if (wParam == L'\r' || wParam == L'\t' || wParam == 27)
             return 0;
         break;
+    case WM_PAINT: {
+        // The placeholder is drawn here rather than set as a cue banner: an
+        // edit control draws its cue banner in the system's grey text colour,
+        // which on this dark fill is all but invisible.
+        const LRESULT result = CallWindowProcW(g_editBaseProc, hwnd, msg, wParam, lParam);
+        if (GetWindowTextLengthW(hwnd) == 0) {
+            HDC dc = GetDC(hwnd);
+            HideCaret(hwnd);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            rc.left += LOWORD(SendMessageW(hwnd, EM_GETMARGINS, 0, 0)) + 1;
+            HGDIOBJ oldFont = SelectObject(dc, g_fontEdit);
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, CLR_TEXT_HINT);
+            DrawTextW(dc, L"Search windows", -1, &rc,
+                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            SelectObject(dc, oldFont);
+            ShowCaret(hwnd);
+            ReleaseDC(hwnd, dc);
+        }
+        return result;
+    }
     }
     return CallWindowProcW(g_editBaseProc, hwnd, msg, wParam, lParam);
 }
@@ -899,9 +1021,8 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             g_hInstance, nullptr);
         g_editBaseProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
             g_hwndEdit, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(EditSubclassProc)));
-        SendMessageW(g_hwndEdit, EM_SETCUEBANNER, TRUE,
-                     reinterpret_cast<LPARAM>(L"Search windows…"));
 
+        g_accent = ReadAccentLight();
         CreateFonts();
         return 0;
     }
@@ -1119,10 +1240,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     if (!hwnd)
         return 1;
 
-    // Rounded corners on Windows 11 (no-op on Windows 10).
+    // Rounded corners on Windows 11 (no-op on Windows 10), and the thin light
+    // outline the Start menu has around its own dark panel.
     DWORD cornerPref = 2;  // DWMWCP_ROUND
     DwmSetWindowAttribute(hwnd, 33 /*DWMWA_WINDOW_CORNER_PREFERENCE*/,
                           &cornerPref, sizeof(cornerPref));
+    const BOOL dark = TRUE;
+    DwmSetWindowAttribute(hwnd, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &dark, sizeof(dark));
+    const COLORREF border = RGB(62, 62, 62);
+    DwmSetWindowAttribute(hwnd, 34 /*DWMWA_BORDER_COLOR*/, &border, sizeof(border));
 
     g_taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
 
@@ -1170,6 +1296,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     if (g_fontApp) DeleteObject(g_fontApp);
     if (g_fontTitle) DeleteObject(g_fontTitle);
     if (g_fontEdit) DeleteObject(g_fontEdit);
+    if (g_fontSection) DeleteObject(g_fontSection);
+    if (g_fontGlyph) DeleteObject(g_fontGlyph);
     if (g_brushSearchBg) DeleteObject(g_brushSearchBg);
     CoUninitialize();
     ReleaseMutex(mutex);
