@@ -63,4 +63,70 @@ int Px(HWND hwnd, int at96);
 void RoundBox(HDC dc, const RECT& rc, int radius, COLORREF fill, COLORREF line,
               int lineWidth = 1);
 
+// ------------------------------------------------------------------ layout
+//
+// The settings pages are laid out in code, in pixels on Windows 11's 4px
+// grid, rather than in the template's dialog units: a dialog unit is a
+// fraction of the font's size, so no two gaps come out the same and none
+// lands on the grid. The template only says which controls exist. The values
+// are Microsoft's spacing guidance for Windows apps, in 96-dpi pixels.
+
+constexpr int kMargin = 24;     // window edge to content, all round
+constexpr int kHeadingGap = 8;  // a section heading to its card (header to control)
+constexpr int kCardPad = 16;    // a card's edge to what is on it (surface to edge text)
+constexpr int kRowH = 32;       // a row with a button or a combo box: their height
+constexpr int kCheckH = 24;     // a row with a checkbox or radio button
+constexpr int kGap = 8;         // between buttons, and between rows
+constexpr int kLabelGap = 12;   // a control to its label or its description
+constexpr int kSectionGap = 24; // a card to the next section's heading
+constexpr int kButtonW = 120;   // the narrowest a push button gets
+
+// Drawn in the secondary text colour: descriptions and hints.
+void SetSecondary(HWND ctl);
+
+// Measurements in the control's own font.
+int LineHeight(HWND ctl);
+int TextWidth(HWND ctl);
+int TextHeight(HWND ctl, int width);  // its text wrapped to `width`
+int ButtonWidth(HWND button);         // its text plus padding, at least kButtonW
+int CheckWidth(HWND button);          // the box, the gap and its text
+
+// The first child whose text is or starts with `text`, for controls the
+// template gives no ID.
+HWND ChildByText(HWND parent, const wchar_t* text, bool prefix = false);
+
+void Place(HWND ctl, int x, int y, int w, int h);
+// One line of text, centred down a row of `rowH`.
+void PlaceText(HWND ctl, int x, int rowY, int w, int rowH);
+// A drop-down combo box whose closed plate is `h` tall.
+void PlaceCombo(HWND combo, int x, int y, int w, int h);
+
+// Stacks sections down a page: a heading, a card, the next heading. Each
+// section is a group box, which is sized here to cover its heading and card;
+// the controls placed between BeginSection and EndSection go on the card,
+// between inL and inR.
+class Flow {
+public:
+    explicit Flow(HWND page);
+    int Px(int at96) const;
+
+    void BeginSection(HWND groupBox);
+    void EndSection();
+    // Down to the end of the last thing laid out, with no gap after it.
+    int Height() const;
+
+    int y = 0;
+    int left = 0, right = 0;  // the page's content edges
+    int inL = 0, inR = 0;     // the current card's, or the page's between sections
+
+private:
+    HWND page_;
+    HWND group_ = nullptr;
+    int headingTop_ = 0;
+    bool afterSection_ = false;
+};
+
+// A section heading's height and the gap under it: where its card starts.
+int HeadingBlock(HWND groupBox);
+
 } // namespace dark

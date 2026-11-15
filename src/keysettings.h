@@ -13,6 +13,11 @@ KeysEdit* BeginKeysEdit(); // a copy of g_config to edit
 HWND CreateKeysTab(HWND host, HINSTANCE instance, KeysEdit* edit);
 HWND CreateKeyOptionsTab(HWND host, HINSTANCE instance, KeysEdit* edit);
 
+// Lay each tab out at its current width (see dark::Flow); each returns the
+// height it needs, so the host can size the window to the tallest.
+int LayoutKeysTab(HWND page);
+int LayoutKeyOptionsTab(HWND page);
+
 // On OK: stores the edit into g_config, saves keys.ini, hands the hook its new
 // tables and offers to write the Scancode Map if the config now calls for one.
 void CommitKeysEdit(HWND owner, KeysEdit* edit);

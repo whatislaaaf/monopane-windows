@@ -3,6 +3,7 @@
 #include <commctrl.h>
 #include <windowsx.h>
 
+#include <algorithm>
 #include <string>
 
 #include "aliases.h"
@@ -184,6 +185,84 @@ void CommitSwitcherTab(HWND page)
         g_settings.rotateHotkey = g_editRotate;
 }
 
+// Lays the tab out at its current width; returns the height it needs.
+int LayoutSwitcherTab(HWND page)
+{
+    using namespace dark;
+    Flow f(page);
+    const int rowH = f.Px(kRowH);
+    const int checkH = f.Px(kCheckH);
+    const auto item = [page](int id) { return GetDlgItem(page, id); };
+
+    // Hotkeys: a name, the chord, and Set... on the right, per row; the hint
+    // under both.
+    f.BeginSection(ChildByText(page, L"Hotkeys"));
+    {
+        const int buttonW = ButtonWidth(item(IDC_BTN_HOTKEY));
+        const int buttonX = f.inR - buttonW;
+        const int nameW = f.Px(140);
+        const int chordX = f.inL + nameW + f.Px(kLabelGap);
+        const int chordW = buttonX - f.Px(kLabelGap) - chordX;
+        const auto row = [&](const wchar_t* name, int chordId, int buttonId) {
+            PlaceText(ChildByText(page, name), f.inL, f.y, nameW, rowH);
+            PlaceText(item(chordId), chordX, f.y, chordW, rowH);
+            Place(item(buttonId), buttonX, f.y, buttonW, rowH);
+            f.y += rowH;
+        };
+        row(L"Open the switcher", IDC_TXT_HOTKEY, IDC_BTN_HOTKEY);
+        f.y += f.Px(kGap);
+        row(L"Rotate the display", IDC_TXT_ROTATE, IDC_BTN_ROTATE);
+        f.y += f.Px(kLabelGap);
+        HWND hint = item(IDC_TXT_HOTKEY_HINT);
+        SetSecondary(hint);
+        const int hintH = 2 * LineHeight(hint);  // its longest text wraps to two
+        Place(hint, f.inL, f.y, f.inR - f.inL, hintH);
+        f.y += hintH;
+    }
+    f.EndSection();
+
+    // A checkbox with its description under its label, the way Settings
+    // explains a switch.
+    f.BeginSection(ChildByText(page, L"When activating a window"));
+    {
+        HWND check = item(IDC_CHK_ACTIVATE_ALL);
+        Place(check, f.inL, f.y, CheckWidth(check), checkH);
+        f.y += checkH;
+        HWND note = ChildByText(page, L"Off:", true);
+        SetSecondary(note);
+        const int textX = f.inL + f.Px(16 + 8);  // under the label, past the box
+        const int lh = LineHeight(note);
+        Place(note, textX, f.y, f.inR - textX, lh);
+        f.y += lh;
+    }
+    f.EndSection();
+
+    f.BeginSection(ChildByText(page, L"Switcher"));
+    {
+        HWND preselect = item(IDC_CHK_PRESELECT);
+        HWND matchApp = item(IDC_CHK_MATCH_APP);
+        Place(preselect, f.inL, f.y, CheckWidth(preselect), checkH);
+        f.y += checkH + f.Px(kGap);
+        Place(matchApp, f.inL, f.y, CheckWidth(matchApp), checkH);
+        f.y += checkH;
+    }
+    f.EndSection();
+
+    f.BeginSection(ChildByText(page, L"Search memory"));
+    {
+        HWND button = item(IDC_BTN_CLEAR_MEMORY);
+        const int buttonW = ButtonWidth(button);
+        const int buttonX = f.inR - buttonW;
+        PlaceText(ChildByText(page, L"Monopane remembers", true), f.inL, f.y,
+                  buttonX - f.Px(kLabelGap) - f.inL, rowH);
+        Place(button, buttonX, f.y, buttonW, rowH);
+        f.y += rowH;
+    }
+    f.EndSection();
+
+    return f.Height();
+}
+
 // ------------------------------------------------------------- host dialog
 
 constexpr int kTabCount = 3;
@@ -196,6 +275,8 @@ struct HostState {
     // Autostart state when the dialog opened; SetAutoStart runs elevated (UAC
     // prompt), so it is only called when the checkbox actually changed.
     bool autoStartAtOpen = false;
+    // Where the hairline over the footer runs, in client pixels.
+    int footerRuleY = 0;
 };
 
 HostState* Host(HWND dlg)
@@ -205,37 +286,86 @@ HostState* Host(HWND dlg)
 
 // The tab strip is painted by the dialog itself rather than being a tab
 // control: SysTabControl32 only comes in light, and a row of names with an
-// accent line under the current one is all that is wanted of it anyway.
-// Everything below is in dialog units until MapDialogRect.
-constexpr int kStripBottomDu = 28;
-constexpr int kTabPadDu = 10;
+// accent mark under the current one is all that is wanted of it anyway.
+// In 96-dpi pixels, like the rest of the layout (see dark::Flow).
+constexpr int kClientWidth = 720;
+constexpr int kStripH = 44;    // the strip, from the top of the client area
+constexpr int kTabPad = 12;    // either side of a tab's name
+constexpr int kStripToPage = 16;
 
-RECT PageRectPx(HWND dlg)
-{
-    RECT rc{ 6, kStripBottomDu + 2, 414, 270 };
-    MapDialogRect(dlg, &rc);
-    return rc;
-}
-
-// The strip's tab rectangles, in pixels, measured from the names.
+// The strip's tab rectangles, in pixels, measured from the names. The first
+// name starts on the page margin, in line with everything under it.
 void TabRectsPx(HWND dlg, RECT out[kTabCount])
 {
-    RECT strip{ kTabPadDu, 0, 0, kStripBottomDu };
-    MapDialogRect(dlg, &strip);
-    RECT pad{ 0, 0, kTabPadDu, 0 };
-    MapDialogRect(dlg, &pad);
-
+    const int pad = dark::Px(dlg, kTabPad);
     HDC dc = GetDC(dlg);
     HGDIOBJ old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(dlg, WM_GETFONT, 0, 0)));
-    int x = strip.left;
+    int x = dark::Px(dlg, dark::kMargin) - pad;
     for (int i = 0; i < kTabCount; ++i) {
         SIZE sz{};
         GetTextExtentPoint32W(dc, kTabNames[i], lstrlenW(kTabNames[i]), &sz);
-        out[i] = RECT{ x, 0, x + sz.cx + 2 * pad.right, strip.bottom };
+        out[i] = RECT{ x, 0, x + sz.cx + 2 * pad, dark::Px(dlg, kStripH) };
         x = out[i].right;
     }
     SelectObject(dc, old);
     ReleaseDC(dlg, dc);
+}
+
+// Lays out the pages under the strip, the footer under them, and sizes the
+// window to fit: as tall as the tallest page needs, so no tab is cramped.
+void LayoutHost(HWND dlg, HostState* st)
+{
+    using namespace dark;
+    const auto px = [dlg](int at96) { return Px(dlg, at96); };
+    const int width = px(kClientWidth);
+    const int pageTop = px(kStripH) + px(kStripToPage);
+
+    for (HWND tab : st->tabs)
+        SetWindowPos(tab, HWND_TOP, 0, pageTop, width, px(100), SWP_NOACTIVATE);
+    int pageH = LayoutSwitcherTab(st->tabs[0]);
+    pageH = std::max(pageH, LayoutKeysTab(st->tabs[1]));
+    pageH = std::max(pageH, LayoutKeyOptionsTab(st->tabs[2]));
+    for (HWND tab : st->tabs)
+        SetWindowPos(tab, nullptr, 0, pageTop, width, pageH, SWP_NOZORDER | SWP_NOACTIVATE);
+
+    // The footer: a hairline, then the autostart switch on the left and the
+    // commands on the right, Cancel outermost.
+    st->footerRuleY = pageTop + pageH + px(kSectionGap);
+    const int rowY = st->footerRuleY + 1 + px(kSectionGap);
+    const int rowH = px(kRowH);
+
+    HWND autoStart = GetDlgItem(dlg, IDC_CHK_AUTOSTART);
+    Place(autoStart, px(kMargin), rowY + (rowH - px(kCheckH)) / 2, CheckWidth(autoStart),
+          px(kCheckH));
+
+    HWND cancel = GetDlgItem(dlg, IDCANCEL);
+    HWND ok = GetDlgItem(dlg, IDOK);
+    HWND folder = GetDlgItem(dlg, IDC_BTN_CONFIGFOLDER);
+    const int cancelW = ButtonWidth(cancel);
+    const int okW = ButtonWidth(ok);
+    const int folderW = ButtonWidth(folder);
+    int x = width - px(kMargin) - cancelW;
+    Place(cancel, x, rowY, cancelW, rowH);
+    x -= px(kGap) + okW;
+    Place(ok, x, rowY, okW, rowH);
+    // A utility rather than an answer to the dialog, so set apart from them.
+    x -= px(kSectionGap) + folderW;
+    Place(folder, x, rowY, folderW, rowH);
+
+    const int clientH = rowY + rowH + px(kMargin);
+
+    // Grow the frame around that client area, and centre it on its monitor.
+    RECT wr, cr;
+    GetWindowRect(dlg, &wr);
+    GetClientRect(dlg, &cr);
+    const int outerW = width + (wr.right - wr.left) - cr.right;
+    const int outerH = clientH + (wr.bottom - wr.top) - cr.bottom;
+    MONITORINFO mi{ sizeof(mi) };
+    GetMonitorInfoW(MonitorFromWindow(dlg, MONITOR_DEFAULTTONEAREST), &mi);
+    const RECT& work = mi.rcWork;
+    SetWindowPos(dlg, nullptr, work.left + (work.right - work.left - outerW) / 2,
+                 std::max<LONG>(work.top, work.top + (work.bottom - work.top - outerH) / 2),
+                 outerW, outerH, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void PaintTabStrip(HWND dlg, HostState* st)
@@ -263,6 +393,16 @@ void PaintTabStrip(HWND dlg, HostState* st)
         }
     }
     SelectObject(dc, old);
+
+    // The hairline the footer sits under, Windows 11's divider colour.
+    if (st && st->footerRuleY > 0) {
+        RECT client;
+        GetClientRect(dlg, &client);
+        const RECT rule{ 0, st->footerRuleY, client.right, st->footerRuleY + 1 };
+        HBRUSH line = CreateSolidBrush(RGB(53, 53, 53));
+        FillRect(dc, &rule, line);
+        DeleteObject(line);
+    }
     EndPaint(dlg, &ps);
 }
 
@@ -271,8 +411,9 @@ void SelectTab(HWND dlg, HostState* st, int index)
     st->selected = index;
     for (int i = 0; i < kTabCount; ++i)
         ShowWindow(st->tabs[i], i == index ? SW_SHOW : SW_HIDE);
-    RECT strip{ 0, 0, 420, kStripBottomDu + 1 };
-    MapDialogRect(dlg, &strip);
+    RECT client;
+    GetClientRect(dlg, &client);
+    const RECT strip{ 0, 0, client.right, dark::Px(dlg, kStripH) };
     InvalidateRect(dlg, &strip, TRUE);
 }
 
@@ -300,10 +441,7 @@ INT_PTR CALLBACK SettingsDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lPara
                                          SwitcherTabProc, 0);
         st->tabs[1] = CreateKeysTab(dlg, instance, st->keys);
         st->tabs[2] = CreateKeyOptionsTab(dlg, instance, st->keys);
-        const RECT page = PageRectPx(dlg);
-        for (HWND tab : st->tabs)
-            SetWindowPos(tab, HWND_TOP, page.left, page.top, page.right - page.left,
-                         page.bottom - page.top, SWP_NOACTIVATE);
+        LayoutHost(dlg, st);
         SelectTab(dlg, st, 0);
 
         st->autoStartAtOpen = IsAutoStartEnabled();

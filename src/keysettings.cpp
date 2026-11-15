@@ -2,6 +2,7 @@
 
 #include <commctrl.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -194,10 +195,13 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
     }
 
     // The Scancode Map text depends on what the picker on the other tab has
-    // been doing, so it is refreshed each time this tab comes to the front.
+    // been doing, so it is refreshed each time this tab comes to the front,
+    // and the tab laid out again around however many lines it now runs to.
     case WM_SHOWWINDOW:
-        if (wParam && st)
+        if (wParam && st) {
             UpdateScancodeMapText(dlg, st->work);
+            LayoutKeyOptionsTab(dlg);
+        }
         return FALSE;
 
     case keychord::WM_CHORD_CAPTURED: {
@@ -361,6 +365,115 @@ KeysEdit* BeginKeysEdit()
     edit->work = g_config;
     ReleaseSRWLockShared(&g_settingsLock);
     return edit;
+}
+
+int LayoutKeysTab(HWND page)
+{
+    using namespace dark;
+    Flow f(page);
+    const int checkH = f.Px(kCheckH);
+    const int width = f.right - f.left;
+
+    // The layer switch, a radio pair along the top.
+    HWND base = GetDlgItem(page, IDC_RAD_BASE);
+    HWND nav = GetDlgItem(page, IDC_RAD_NAV);
+    const int baseW = CheckWidth(base);
+    Place(base, f.left, f.y, baseW, checkH);
+    Place(nav, f.left + baseW + f.Px(kSectionGap), f.y, CheckWidth(nav), checkH);
+    f.y += checkH + f.Px(kLabelGap);
+
+    // The keyboard, full width, at the template's proportions.
+    const int boardH = width * 152 / 384;
+    Place(GetDlgItem(page, IDC_KEYBOARD), f.left, f.y, width, boardH);
+    f.y += boardH + f.Px(kLabelGap);
+
+    // What the picker is doing, then how to use it, each a paragraph.
+    HWND status = GetDlgItem(page, IDC_TXT_STATUS);
+    const int statusH = 2 * LineHeight(status);  // a capture prompt runs to two lines
+    Place(status, f.left, f.y, width, statusH);
+    f.y += statusH + f.Px(kLabelGap);
+
+    for (const wchar_t* start : { L"Left-click a key", L"A key marked" }) {
+        HWND hint = ChildByText(page, start, true);
+        SetSecondary(hint);
+        const int h = TextHeight(hint, width);
+        Place(hint, f.left, f.y, width, h);
+        f.y += h + f.Px(4);
+    }
+    return f.y - f.Px(4);
+}
+
+int LayoutKeyOptionsTab(HWND page)
+{
+    using namespace dark;
+    Flow f(page);
+    const int rowH = f.Px(kRowH);
+    const int gap = f.Px(kGap);
+    const auto item = [page](int id) { return GetDlgItem(page, id); };
+
+    // The list, with its three commands stacked in a column to its right as
+    // tall as the list is.
+    f.BeginSection(ChildByText(page, L"Hotkeys on the key map"));
+    {
+        const int ids[] = { IDC_BTN_CHORD_ADD, IDC_BTN_CHORD_SET, IDC_BTN_CHORD_DEL };
+        int columnW = 0;
+        for (int id : ids)
+            columnW = std::max(columnW, ButtonWidth(item(id)));
+        const int columnX = f.inR - columnW;
+        const int listH = 3 * rowH + 2 * gap;
+        Place(item(IDC_LST_CHORDS), f.inL, f.y, columnX - f.Px(kLabelGap) - f.inL, listH);
+        for (int i = 0; i < 3; ++i)
+            Place(item(ids[i]), columnX, f.y + i * (rowH + gap), columnW, rowH);
+        f.y += listH + f.Px(kLabelGap);
+
+        HWND hint = item(IDC_TXT_CHORD_HINT);
+        SetSecondary(hint);
+        const int hintH = 2 * LineHeight(hint);  // the capture prompts run to two lines
+        Place(hint, f.inL, f.y, f.inR - f.inL, hintH);
+        f.y += hintH;
+    }
+    f.EndSection();
+
+    // Two labelled drop-downs on one row, the reset on the right.
+    f.BeginSection(ChildByText(page, L"Keyboard"));
+    {
+        int x = f.inL;
+        const auto labelled = [&](const wchar_t* label, int comboId, int comboW) {
+            HWND name = ChildByText(page, label);
+            const int nameW = TextWidth(name);
+            PlaceText(name, x, f.y, nameW, rowH);
+            x += nameW + gap;
+            PlaceCombo(item(comboId), x, f.y, comboW, rowH);
+            x += comboW;
+        };
+        labelled(L"Board:", IDC_CMB_BOARD, f.Px(200));
+        x += f.Px(kSectionGap);
+        labelled(L"Layout:", IDC_CMB_LAYOUT, f.Px(120));
+
+        HWND reset = item(IDC_BTN_RESETDEFAULTS);
+        const int resetW = ButtonWidth(reset);
+        Place(reset, f.inR - resetW, f.y, resetW, rowH);
+        f.y += rowH;
+    }
+    f.EndSection();
+
+    // The explanation as tall as it runs, Remove level with its first line.
+    f.BeginSection(ChildByText(page, L"Kernel Scancode Map"));
+    {
+        HWND remove = item(IDC_BTN_SCMAP_RESET);
+        const int removeW = ButtonWidth(remove);
+        const int removeX = f.inR - removeW;
+        HWND text = item(IDC_TXT_SCMAP);
+        const int textW = removeX - f.Px(kLabelGap) - f.inL;
+        const int textH = TextHeight(text, textW);
+        Place(text, f.inL, f.y, textW, textH);
+        Place(remove, removeX, f.y, removeW, rowH);
+        f.y += std::max(textH, rowH);
+    }
+    f.EndSection();
+
+    InvalidateRect(page, nullptr, TRUE);
+    return f.Height();
 }
 
 HWND CreateKeysTab(HWND host, HINSTANCE instance, KeysEdit* edit)

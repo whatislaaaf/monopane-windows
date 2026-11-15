@@ -4,6 +4,7 @@
 #include <dwmapi.h>
 #include <uxtheme.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,15 @@ COLORREF g_accent = RGB(76, 194, 255);
 
 // Windows 11 rounds controls and the cards they sit on by 4px.
 constexpr int kRadius = 4;
+
+// What SetSecondary leaves in a static's GWLP_USERDATA, which statics do not
+// use themselves.
+constexpr LONG_PTR kSecondaryMark = 0x4D53'4543;  // "MSEC"
+
+bool IsSecondary(HWND ctl)
+{
+    return GetWindowLongPtrW(ctl, GWLP_USERDATA) == kSecondaryMark;
+}
 
 COLORREF Blend(COLORREF a, COLORREF b, int pct)
 {
@@ -120,7 +130,7 @@ RECT GroupRect(HWND groupBox)
 RECT CardRect(HWND groupBox)
 {
     RECT rc = GroupRect(groupBox);
-    rc.top += HeadingHeight(groupBox) + Px(groupBox, 6);
+    rc.top += HeadingBlock(groupBox);
     return rc;
 }
 
@@ -161,7 +171,7 @@ void PaintBackground(HWND dlg, HDC dc)
 
         HGDIOBJ oldFont = SelectObject(dc, UiFont(gb, FW_SEMIBOLD));
         SetTextColor(dc, kText);
-        RECT heading{ group.left + Px(gb, 2), group.top, group.right, card.top };
+        RECT heading{ group.left, group.top, group.right, card.top };
         DrawTextW(dc, Text(gb).c_str(), -1, &heading, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
         SelectObject(dc, oldFont);
 
@@ -496,7 +506,9 @@ bool Handle(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam, INT_PTR& result)
         HDC dc = reinterpret_cast<HDC>(wParam);
         HWND ctl = reinterpret_cast<HWND>(lParam);
         const bool onCard = BackOf(ctl) == kCard;
-        SetTextColor(dc, IsWindowEnabled(ctl) ? kText : kDisabled);
+        SetTextColor(dc, !IsWindowEnabled(ctl)            ? kDisabled
+                         : IsSecondary(ctl)               ? kDim
+                                                          : kText);
         SetBkColor(dc, onCard ? kCard : kBg);
         result = reinterpret_cast<INT_PTR>(onCard ? CardBrush() : BgBrush());
         return true;
@@ -525,6 +537,159 @@ bool Handle(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam, INT_PTR& result)
     }
     }
     return false;
+}
+
+// ------------------------------------------------------------------ layout
+
+void SetSecondary(HWND ctl)
+{
+    SetWindowLongPtrW(ctl, GWLP_USERDATA, kSecondaryMark);
+}
+
+namespace {
+
+// A DC with the control's font selected, for measuring.
+struct FontDC {
+    explicit FontDC(HWND ctl) : hwnd(ctl), dc(GetDC(ctl))
+    {
+        old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(ctl, WM_GETFONT, 0, 0)));
+    }
+    ~FontDC()
+    {
+        SelectObject(dc, old);
+        ReleaseDC(hwnd, dc);
+    }
+    HWND hwnd;
+    HDC dc;
+    HGDIOBJ old;
+};
+
+} // namespace
+
+int LineHeight(HWND ctl)
+{
+    FontDC f(ctl);
+    TEXTMETRICW tm{};
+    GetTextMetricsW(f.dc, &tm);
+    return tm.tmHeight;
+}
+
+int TextWidth(HWND ctl)
+{
+    FontDC f(ctl);
+    const std::wstring text = Text(ctl);
+    SIZE sz{};
+    GetTextExtentPoint32W(f.dc, text.c_str(), static_cast<int>(text.size()), &sz);
+    return sz.cx;
+}
+
+int TextHeight(HWND ctl, int width)
+{
+    FontDC f(ctl);
+    const std::wstring text = Text(ctl);
+    RECT rc{ 0, 0, width, 0 };
+    DrawTextW(f.dc, text.c_str(), -1, &rc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+    return rc.bottom;
+}
+
+int ButtonWidth(HWND button)
+{
+    return std::max(Px(button, kButtonW), TextWidth(button) + Px(button, 32));
+}
+
+int CheckWidth(HWND button)
+{
+    // The box (16), the gap to the text (8), and a little for the focus rect.
+    return Px(button, 16 + 8 + 4) + TextWidth(button);
+}
+
+HWND ChildByText(HWND parent, const wchar_t* text, bool prefix)
+{
+    const size_t len = wcslen(text);
+    for (HWND c = GetWindow(parent, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
+        const std::wstring t = Text(c);
+        if (prefix ? t.compare(0, len, text) == 0 : t == text)
+            return c;
+    }
+    return nullptr;
+}
+
+void Place(HWND ctl, int x, int y, int w, int h)
+{
+    if (ctl)
+        SetWindowPos(ctl, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void PlaceText(HWND ctl, int x, int rowY, int w, int rowH)
+{
+    if (!ctl)
+        return;
+    const int lh = LineHeight(ctl);
+    Place(ctl, x, rowY + (rowH - lh) / 2, w, lh);
+}
+
+void PlaceCombo(HWND combo, int x, int y, int w, int h)
+{
+    if (!combo)
+        return;
+    // A drop-down list's own height is the closed plate plus the list it
+    // drops, and the plate is sized by its item height. So: set the item
+    // height for the plate, see what the plate came to, and correct once.
+    const int listH = Px(combo, 240);
+    SendMessageW(combo, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), h - Px(combo, 6));
+    Place(combo, x, y, w, h + listH);
+    RECT rc;
+    GetWindowRect(combo, &rc);
+    const int plate = rc.bottom - rc.top;
+    if (plate != h) {
+        const LRESULT item = SendMessageW(combo, CB_GETITEMHEIGHT, static_cast<WPARAM>(-1), 0);
+        SendMessageW(combo, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), item + (h - plate));
+        Place(combo, x, y, w, h + listH);
+    }
+}
+
+int HeadingBlock(HWND groupBox)
+{
+    return HeadingHeight(groupBox) + Px(groupBox, kHeadingGap);
+}
+
+Flow::Flow(HWND page) : page_(page)
+{
+    RECT rc;
+    GetClientRect(page, &rc);
+    left = inL = Px(kMargin);
+    right = inR = rc.right - Px(kMargin);
+}
+
+int Flow::Px(int at96) const
+{
+    return dark::Px(page_, at96);
+}
+
+void Flow::BeginSection(HWND groupBox)
+{
+    group_ = groupBox;
+    headingTop_ = y;
+    y += HeadingBlock(groupBox) + Px(kCardPad);
+    inL = left + Px(kCardPad);
+    inR = right - Px(kCardPad);
+    afterSection_ = false;
+}
+
+void Flow::EndSection()
+{
+    y += Px(kCardPad);
+    Place(group_, left, headingTop_, right - left, y - headingTop_);
+    group_ = nullptr;
+    inL = left;
+    inR = right;
+    y += Px(kSectionGap);
+    afterSection_ = true;
+}
+
+int Flow::Height() const
+{
+    return afterSection_ ? y - Px(kSectionGap) : y;
 }
 
 } // namespace dark
