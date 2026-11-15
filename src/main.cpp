@@ -85,7 +85,7 @@ HFONT g_fontApp = nullptr;
 HFONT g_fontTitle = nullptr;
 HFONT g_fontEdit = nullptr;
 HFONT g_fontSection = nullptr;  // the "Open windows" heading
-HFONT g_fontGlyph = nullptr;    // the magnifier in the search box
+HFONT g_fontGlyph = nullptr;    // the icon in the search box
 HBRUSH g_brushSearchBg = nullptr;
 COLORREF g_accent = CLR_ACCENT_FALLBACK;
 int g_editLineH = 0;   // one line of g_fontEdit, for centring the search box
@@ -217,7 +217,7 @@ int ListTop()
     return Scale(BASE_HEADER_H) + Scale(BASE_SECTION_H);
 }
 
-// Where the edit control's text starts: past the magnifier.
+// Where the edit control's text starts: past the icon.
 int SearchTextLeft()
 {
     return SearchPlateRect().left + Scale(40);
@@ -453,12 +453,13 @@ void PaintOverlay(HDC hdc, const RECT& client)
 
     SetBkMode(mem, TRANSPARENT);
 
-    // The magnifier, in the accent colour, left of where the typing starts.
+    // Task View's glyph, in the accent colour, left of where the typing
+    // starts: this box searches windows, not the web or the disk.
     {
         RECT glyph{ plate.left + Scale(10), plate.top, SearchTextLeft() - Scale(6), plate.bottom };
         SelectObject(mem, g_fontGlyph);
         SetTextColor(mem, g_accent);
-        DrawTextW(mem, L"\xE721", -1, &glyph, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        DrawTextW(mem, L"\xE7C4", -1, &glyph, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
 
     // The section heading, as the Start menu heads its grid with "Pinned".
