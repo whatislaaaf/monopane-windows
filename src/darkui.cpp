@@ -5,12 +5,20 @@
 #include <uxtheme.h>
 
 #include <string>
+#include <vector>
+
+#include "paint.h"
 
 namespace dark {
 namespace {
 
 HBRUSH g_bgBrush = nullptr;
 HBRUSH g_cardBrush = nullptr;
+HBRUSH g_listBrush = nullptr;
+COLORREF g_accent = RGB(76, 194, 255);
+
+// Windows 11 rounds controls and the cards they sit on by 4px.
+constexpr int kRadius = 4;
 
 COLORREF Blend(COLORREF a, COLORREF b, int pct)
 {
@@ -26,6 +34,11 @@ bool ClassIs(HWND hwnd, const wchar_t* name)
     return lstrcmpiW(cls, name) == 0;
 }
 
+bool IsGroupBox(HWND hwnd)
+{
+    return ClassIs(hwnd, L"Button") && (GetWindowLongW(hwnd, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX;
+}
+
 std::wstring Text(HWND hwnd)
 {
     wchar_t buf[256] = {};
@@ -33,63 +46,127 @@ std::wstring Text(HWND hwnd)
     return buf;
 }
 
-void DrawCheckMark(HDC dc, const RECT& box, COLORREF color, int dpi)
+// ------------------------------------------------------------------- fonts
+
+// Fonts made here live as long as the process: a handful of sizes at most,
+// shared by every dialog that asks for the same one.
+struct CachedFont {
+    LONG height;
+    LONG weight;
+    bool glyph;
+    HFONT font;
+};
+std::vector<CachedFont> g_fonts;
+
+HFONT CachedUiFont(LONG height, LONG weight, bool glyph)
 {
-    HPEN pen = CreatePen(PS_SOLID, MulDiv(2, dpi, 96), color);
-    HGDIOBJ old = SelectObject(dc, pen);
-    const int w = box.right - box.left;
-    const int h = box.bottom - box.top;
-    const POINT pts[3] = {
-        { box.left + w * 22 / 100, box.top + h * 52 / 100 },
-        { box.left + w * 42 / 100, box.top + h * 72 / 100 },
-        { box.left + w * 78 / 100, box.top + h * 30 / 100 },
-    };
-    Polyline(dc, pts, 3);
-    SelectObject(dc, old);
-    DeleteObject(pen);
+    for (const CachedFont& f : g_fonts)
+        if (f.height == height && f.weight == weight && f.glyph == glyph)
+            return f.font;
+
+    static const bool variable = FontInstalled(L"Segoe UI Variable Text");
+    static const bool fluent = FontInstalled(L"Segoe Fluent Icons");
+    LOGFONTW lf{};
+    lf.lfHeight = height;
+    lf.lfWeight = weight;
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfQuality = CLEARTYPE_QUALITY;
+    wcscpy_s(lf.lfFaceName, glyph      ? (fluent ? L"Segoe Fluent Icons" : L"Segoe MDL2 Assets")
+                            : variable ? L"Segoe UI Variable Text"
+                                       : L"Segoe UI");
+    HFONT font = CreateFontIndirectW(&lf);
+    g_fonts.push_back({ height, weight, glyph, font });
+    return font;
 }
 
-// A group box: a rounded frame with the caption sitting on its top edge.
-// Group boxes do not send the custom-draw notification the other buttons do,
-// so this is painted from a subclass instead; the interior is left alone,
-// since the controls inside it are siblings painted after it.
-void PaintGroupBox(HWND hwnd)
+LONG FontHeight(HWND hwnd)
 {
-    PAINTSTRUCT ps;
-    HDC dc = BeginPaint(hwnd, &ps);
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    HGDIOBJ oldFont = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(hwnd, WM_GETFONT, 0, 0)));
-    SetBkMode(dc, TRANSPARENT);
+    LOGFONTW lf{};
+    HFONT font = reinterpret_cast<HFONT>(SendMessageW(hwnd, WM_GETFONT, 0, 0));
+    if (!font || !GetObjectW(font, sizeof(lf), &lf) || lf.lfHeight == 0)
+        return -Px(hwnd, 12);
+    return lf.lfHeight;
+}
 
+// The control's own size in Windows 11's face, at the given weight.
+HFONT UiFont(HWND hwnd, LONG weight)
+{
+    return CachedUiFont(FontHeight(hwnd), weight, false);
+}
+
+// ------------------------------------------------------------------- cards
+
+// The heading a group box's caption becomes, and the card under it, in the
+// parent's client coordinates.
+int HeadingHeight(HWND groupBox)
+{
+    HDC dc = GetDC(groupBox);
+    HGDIOBJ old = SelectObject(dc, UiFont(groupBox, FW_SEMIBOLD));
     TEXTMETRICW tm{};
     GetTextMetricsW(dc, &tm);
-    RECT frame = rc;
-    frame.top += tm.tmHeight / 2;
-    frame.right -= 1;
-    frame.bottom -= 1;
-    {
-        HPEN pen = CreatePen(PS_SOLID, 1, kLine);
-        HGDIOBJ oldPen = SelectObject(dc, pen);
-        HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-        const int radius = Px(hwnd, 8);
-        RoundRect(dc, frame.left, frame.top, frame.right, frame.bottom, radius, radius);
-        SelectObject(dc, oldBrush);
-        SelectObject(dc, oldPen);
-        DeleteObject(pen);
+    SelectObject(dc, old);
+    ReleaseDC(groupBox, dc);
+    return tm.tmHeight;
+}
+
+RECT GroupRect(HWND groupBox)
+{
+    RECT rc;
+    GetWindowRect(groupBox, &rc);
+    MapWindowPoints(nullptr, GetParent(groupBox), reinterpret_cast<POINT*>(&rc), 2);
+    return rc;
+}
+
+RECT CardRect(HWND groupBox)
+{
+    RECT rc = GroupRect(groupBox);
+    rc.top += HeadingHeight(groupBox) + Px(groupBox, 6);
+    return rc;
+}
+
+// What a control paints its background with: the card's colour when it sits
+// on one, the page's otherwise.
+COLORREF BackOf(HWND ctl)
+{
+    HWND parent = GetParent(ctl);
+    RECT rc;
+    GetWindowRect(ctl, &rc);
+    MapWindowPoints(nullptr, parent, reinterpret_cast<POINT*>(&rc), 2);
+    const POINT centre{ (rc.left + rc.right) / 2, (rc.top + rc.bottom) / 2 };
+    for (HWND s = GetWindow(parent, GW_CHILD); s; s = GetWindow(s, GW_HWNDNEXT)) {
+        if (s == ctl || !IsGroupBox(s) || !IsWindowVisible(s))
+            continue;
+        const RECT card = CardRect(s);
+        if (PtInRect(&card, centre))
+            return kCard;
     }
-    const std::wstring text = Text(hwnd);
-    if (!text.empty()) {
-        SIZE sz{};
-        GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &sz);
-        RECT tr{ rc.left + Px(hwnd, 10), rc.top, rc.right, rc.top + tm.tmHeight };
-        RECT pad{ tr.left - Px(hwnd, 4), tr.top, tr.left + sz.cx + Px(hwnd, 4), tr.bottom };
-        FillRect(dc, &pad, BgBrush());
-        SetTextColor(dc, kDim);
-        DrawTextW(dc, text.c_str(), -1, &tr, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+    return kBg;
+}
+
+// The page, then each group box's heading and card on it. The group boxes
+// themselves paint nothing; the controls inside them are siblings painted
+// after this, on top of the card.
+void PaintBackground(HWND dlg, HDC dc)
+{
+    RECT client;
+    GetClientRect(dlg, &client);
+    FillRect(dc, &client, BgBrush());
+
+    SetBkMode(dc, TRANSPARENT);
+    for (HWND gb = GetWindow(dlg, GW_CHILD); gb; gb = GetWindow(gb, GW_HWNDNEXT)) {
+        if (!IsGroupBox(gb) || !IsWindowVisible(gb))
+            continue;
+        const RECT group = GroupRect(gb);
+        const RECT card = CardRect(gb);
+
+        HGDIOBJ oldFont = SelectObject(dc, UiFont(gb, FW_SEMIBOLD));
+        SetTextColor(dc, kText);
+        RECT heading{ group.left + Px(gb, 2), group.top, group.right, card.top };
+        DrawTextW(dc, Text(gb).c_str(), -1, &heading, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, oldFont);
+
+        OutlineRoundRectAA(dc, card, Px(gb, kRadius), kCard, kCardLine, kBg);
     }
-    SelectObject(dc, oldFont);
-    EndPaint(hwnd, &ps);
 }
 
 LRESULT CALLBACK GroupBoxProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
@@ -97,7 +174,8 @@ LRESULT CALLBACK GroupBoxProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
 {
     switch (msg) {
     case WM_PAINT:
-        PaintGroupBox(hwnd);
+        // Drawn by the parent, under everything; see PaintBackground.
+        ValidateRect(hwnd, nullptr);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -107,6 +185,8 @@ LRESULT CALLBACK GroupBoxProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
     }
     return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
+
+// -------------------------------------------------------------- combo box
 
 // A drop-down list combo box: the plate with the current choice and a chevron.
 // The control's own look is the one from two decades ago whichever theme it
@@ -118,7 +198,10 @@ void PaintCombo(HWND hwnd)
     HDC dc = BeginPaint(hwnd, &ps);
     RECT rc;
     GetClientRect(hwnd, &rc);
-    FillRect(dc, &rc, BgBrush());
+    const COLORREF back = BackOf(hwnd);
+    HBRUSH backBrush = CreateSolidBrush(back);
+    FillRect(dc, &rc, backBrush);
+    DeleteObject(backBrush);
 
     const bool disabled = !IsWindowEnabled(hwnd);
     const bool open = SendMessageW(hwnd, CB_GETDROPPEDSTATE, 0, 0) != 0;
@@ -127,36 +210,35 @@ void PaintCombo(HWND hwnd)
     GetCursorPos(&cursor);
     const bool hot = !disabled && WindowFromPoint(cursor) == hwnd;
 
-    RECT plate = rc;
-    plate.right -= 1;
-    plate.bottom -= 1;
-    const COLORREF fill = disabled ? RGB(38, 38, 38) : hot || open ? RGB(64, 64, 64) : kCard;
-    const COLORREF line = open || focused ? kAccent : hot ? RGB(96, 96, 96) : RGB(78, 78, 78);
-    RoundBox(dc, plate, Px(hwnd, 10), fill, line);
+    const COLORREF fill = disabled ? back : open ? kControlDown : hot ? kControlHot : kControl;
+    OutlineRoundRectAA(dc, rc, Px(hwnd, kRadius), fill, kControlLine, back);
+    // Focus shows as the accent along the bottom edge, as a Windows 11 field
+    // does.
+    if (focused || open) {
+        HBRUSH accent = CreateSolidBrush(Accent());
+        const RECT bar{ rc.left + Px(hwnd, kRadius), rc.bottom - Px(hwnd, 2),
+                        rc.right - Px(hwnd, kRadius), rc.bottom };
+        FillRect(dc, &bar, accent);
+        DeleteObject(accent);
+    }
 
     HGDIOBJ oldFont = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(hwnd, WM_GETFONT, 0, 0)));
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, disabled ? kDim : kText);
+    SetTextColor(dc, disabled ? kDisabled : kText);
     const LRESULT sel = SendMessageW(hwnd, CB_GETCURSEL, 0, 0);
     wchar_t text[128] = {};
     if (sel >= 0 && SendMessageW(hwnd, CB_GETLBTEXTLEN, sel, 0) < 128)
         SendMessageW(hwnd, CB_GETLBTEXT, sel, reinterpret_cast<LPARAM>(text));
-    RECT tr{ rc.left + Px(hwnd, 9), rc.top, rc.right - Px(hwnd, 26), rc.bottom };
+    RECT tr{ rc.left + Px(hwnd, 10), rc.top, rc.right - Px(hwnd, 28), rc.bottom };
     DrawTextW(dc, text, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-    SelectObject(dc, oldFont);
 
-    // The chevron: a small open V, pointing down.
-    {
-        const int cx = rc.right - Px(hwnd, 14);
-        const int cy = (rc.top + rc.bottom) / 2;
-        const int half = Px(hwnd, 4);
-        HPEN pen = CreatePen(PS_SOLID, GetDpiForWindow(hwnd) >= 144 ? 2 : 1, disabled ? kDim : kText);
-        HGDIOBJ oldPen = SelectObject(dc, pen);
-        const POINT pts[3] = { { cx - half, cy - half / 2 }, { cx, cy + half / 2 }, { cx + half, cy - half / 2 } };
-        Polyline(dc, pts, 3);
-        SelectObject(dc, oldPen);
-        DeleteObject(pen);
-    }
+    // The chevron, Windows 11's own glyph.
+    RECT chevron{ rc.right - Px(hwnd, 28), rc.top, rc.right - Px(hwnd, 8), rc.bottom };
+    SelectObject(dc, CachedUiFont(-Px(hwnd, 10), FW_NORMAL, true));
+    SetTextColor(dc, disabled ? kDisabled : kDim);
+    DrawTextW(dc, L"\xE70D", -1, &chevron, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    SelectObject(dc, oldFont);
     EndPaint(hwnd, &ps);
 }
 
@@ -187,6 +269,8 @@ LRESULT CALLBACK ComboProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UI
     return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
+// ----------------------------------------------------------------- buttons
+
 // Everything a themed Button control would have painted light: the box, the
 // dot or the plate, and the text. CDRF_SKIPDEFAULT then keeps the theme's own
 // painting off.
@@ -199,7 +283,6 @@ LRESULT DrawButton(const NMCUSTOMDRAW& cd)
     HDC dc = cd.hdc;
     RECT rc;
     GetClientRect(hwnd, &rc);
-    const int dpi = GetDpiForWindow(hwnd);
     const LONG type = GetWindowLongW(hwnd, GWL_STYLE) & BS_TYPEMASK;
     const bool disabled = !IsWindowEnabled(hwnd);
     const bool hot = (cd.uItemState & CDIS_HOT) != 0;
@@ -207,11 +290,14 @@ LRESULT DrawButton(const NMCUSTOMDRAW& cd)
     const bool focused = (cd.uItemState & CDIS_FOCUS) != 0 &&
                          !(SendMessageW(hwnd, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS);
     const std::wstring text = Text(hwnd);
-    const COLORREF textColor = disabled ? kDim : kText;
+    const COLORREF back = BackOf(hwnd);
+    const COLORREF accent = Accent();
 
     HGDIOBJ oldFont = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(hwnd, WM_GETFONT, 0, 0)));
     SetBkMode(dc, TRANSPARENT);
-    FillRect(dc, &rc, BgBrush());
+    HBRUSH backBrush = CreateSolidBrush(back);
+    FillRect(dc, &rc, backBrush);
+    DeleteObject(backBrush);
 
     switch (type) {
     case BS_CHECKBOX:
@@ -222,39 +308,41 @@ LRESULT DrawButton(const NMCUSTOMDRAW& cd)
     case BS_AUTORADIOBUTTON: {
         const bool radio = type == BS_RADIOBUTTON || type == BS_AUTORADIOBUTTON;
         const bool checked = SendMessageW(hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
-        const int size = Px(hwnd, 13);
+        const int size = Px(hwnd, 16);
         const RECT box{ rc.left, (rc.top + rc.bottom - size) / 2,
                         rc.left + size, (rc.top + rc.bottom - size) / 2 + size };
-        const COLORREF fill = checked ? kAccent : hot ? RGB(60, 60, 60) : kCard;
-        const COLORREF line = checked ? kAccent : hot ? kDim : RGB(110, 110, 110);
-        if (radio) {
-            HBRUSH brush = CreateSolidBrush(fill);
-            HPEN pen = CreatePen(PS_SOLID, 1, line);
-            HGDIOBJ oldBrush = SelectObject(dc, brush);
-            HGDIOBJ oldPen = SelectObject(dc, pen);
-            Ellipse(dc, box.left, box.top, box.right, box.bottom);
-            if (checked) {
-                HBRUSH dot = CreateSolidBrush(kText);
-                SelectObject(dc, dot);
-                SelectObject(dc, GetStockObject(NULL_PEN));
-                const int in = size * 30 / 100;
-                Ellipse(dc, box.left + in, box.top + in, box.right - in + 1, box.bottom - in + 1);
-                SelectObject(dc, oldBrush);
-                DeleteObject(dot);
+        const int radius = radio ? size / 2 : Px(hwnd, kRadius);
+
+        if (checked) {
+            // Filled with the accent, the mark in the colour text takes on it.
+            const COLORREF fill = disabled ? kDisabled
+                                : pressed  ? Blend(accent, back, 20)
+                                : hot      ? Blend(accent, back, 10)
+                                           : accent;
+            FillRoundRectAA(dc, box, radius, fill, back);
+            if (radio) {
+                RECT dot = box;
+                const int in = size * 3 / 10;
+                InflateRect(&dot, -in, -in);
+                FillRoundRectAA(dc, dot, (dot.right - dot.left) / 2, kOnAccent, fill);
             } else {
-                SelectObject(dc, oldBrush);
+                HGDIOBJ prev = SelectObject(dc, CachedUiFont(-size * 3 / 4, FW_NORMAL, true));
+                SetTextColor(dc, kOnAccent);
+                RECT mark = box;
+                DrawTextW(dc, L"\xE73E", -1, &mark, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                SelectObject(dc, prev);
             }
-            SelectObject(dc, oldPen);
-            DeleteObject(brush);
-            DeleteObject(pen);
         } else {
-            RoundBox(dc, box, Px(hwnd, 4), fill, line);
-            if (checked)
-                DrawCheckMark(dc, box, kText, dpi);
+            // An empty box: a shade darker than what it sits on, outlined.
+            const COLORREF fill = hot && !disabled ? Blend(back, RGB(255, 255, 255), 5)
+                                                   : Blend(back, RGB(0, 0, 0), 10);
+            const COLORREF line = disabled ? kDisabled : hot ? kDim : RGB(150, 150, 150);
+            OutlineRoundRectAA(dc, box, radius, fill, line, back);
         }
+
         RECT tr = rc;
-        tr.left = box.right + Px(hwnd, 6);
-        SetTextColor(dc, textColor);
+        tr.left = box.right + Px(hwnd, 8);
+        SetTextColor(dc, disabled ? kDisabled : kText);
         DrawTextW(dc, text.c_str(), -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         if (focused) {
             SIZE sz{};
@@ -269,22 +357,23 @@ LRESULT DrawButton(const NMCUSTOMDRAW& cd)
         // Push buttons. The default one is filled with the accent, the way a
         // primary button is; the dialog manager moves BS_DEFPUSHBUTTON to
         // whichever button has the focus, so the fill follows it.
-        const bool def = type == BS_DEFPUSHBUTTON && !disabled;
-        RECT plate = rc;
-        plate.right -= 1;
-        plate.bottom -= 1;
-        COLORREF fill;
-        if (def)
-            fill = pressed ? Blend(kAccent, RGB(0, 0, 0), 25)
-                 : hot     ? Blend(kAccent, RGB(255, 255, 255), 15)
-                           : kAccent;
-        else
-            fill = disabled ? RGB(38, 38, 38)
-                 : pressed  ? RGB(32, 32, 32)
-                 : hot      ? RGB(64, 64, 64)
-                            : kCard;
-        RoundBox(dc, plate, Px(hwnd, 10), fill, def ? fill : hot ? RGB(96, 96, 96) : RGB(78, 78, 78));
-        SetTextColor(dc, def ? RGB(255, 255, 255) : textColor);
+        const bool primary = type == BS_DEFPUSHBUTTON && !disabled;
+        COLORREF textColor;
+        if (primary) {
+            const COLORREF fill = pressed ? Blend(accent, back, 20)
+                                : hot     ? Blend(accent, back, 10)
+                                          : accent;
+            FillRoundRectAA(dc, rc, Px(hwnd, kRadius), fill, back);
+            textColor = pressed ? Blend(kOnAccent, fill, 30) : kOnAccent;
+        } else {
+            const COLORREF fill = disabled ? Blend(kControl, back, 50)
+                                : pressed  ? kControlDown
+                                : hot      ? kControlHot
+                                           : kControl;
+            OutlineRoundRectAA(dc, rc, Px(hwnd, kRadius), fill, kControlLine, back);
+            textColor = disabled ? kDisabled : pressed ? kDim : kText;
+        }
+        SetTextColor(dc, textColor);
         DrawTextW(dc, text.c_str(), -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         if (focused) {
             RECT fr = rc;
@@ -300,6 +389,11 @@ LRESULT DrawButton(const NMCUSTOMDRAW& cd)
 }
 
 } // namespace
+
+COLORREF Accent()
+{
+    return g_accent;
+}
 
 HBRUSH BgBrush()
 {
@@ -335,13 +429,28 @@ void RoundBox(HDC dc, const RECT& rc, int radius, COLORREF fill, COLORREF line, 
 
 void Apply(HWND dlg)
 {
-    // DWMWA_USE_IMMERSIVE_DARK_MODE is 20 from Windows 10 20H1 on and was 19
-    // for a few builds before that.
-    const BOOL on = TRUE;
-    if (FAILED(DwmSetWindowAttribute(dlg, 20, &on, sizeof(on))))
-        DwmSetWindowAttribute(dlg, 19, &on, sizeof(on));
+    g_accent = SystemAccentLight();
+
+    if (!(GetWindowLongW(dlg, GWL_STYLE) & WS_CHILD)) {
+        // DWMWA_USE_IMMERSIVE_DARK_MODE is 20 from Windows 10 20H1 on and was
+        // 19 for a few builds before that.
+        const BOOL on = TRUE;
+        if (FAILED(DwmSetWindowAttribute(dlg, 20, &on, sizeof(on))))
+            DwmSetWindowAttribute(dlg, 19, &on, sizeof(on));
+        // The title bar in the page's own colour, so the window reads as one
+        // surface the way Settings does (Windows 11; ignored before it).
+        const COLORREF caption = kBg;
+        DwmSetWindowAttribute(dlg, 35 /*DWMWA_CAPTION_COLOR*/, &caption, sizeof(caption));
+    }
+
+    // Windows 11's face at the size the dialog template asked for, on the
+    // dialog itself (the tab strip measures with it) and on every child.
+    SendMessageW(dlg, WM_SETFONT, reinterpret_cast<WPARAM>(UiFont(dlg, FW_NORMAL)), FALSE);
 
     for (HWND child = GetWindow(dlg, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+        if (!ClassIs(child, L"MonopaneKeyboard") && !(GetWindowLongW(child, GWL_STYLE) & DS_CONTROL))
+            SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(UiFont(child, FW_NORMAL)), FALSE);
+
         if (ClassIs(child, L"ComboBox")) {
             // The dark theme for the list it drops; the closed box is painted
             // by the subclass.
@@ -356,17 +465,16 @@ void Apply(HWND dlg)
                            GetWindowLongW(child, GWL_EXSTYLE) & ~(WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
             SetWindowPos(child, nullptr, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-            // Rounded like the plates around it. A list box cannot be told to
-            // paint rounded corners, but it can be clipped to them.
+            // Rounded like the controls around it. A list box cannot be told
+            // to paint rounded corners, but it can be clipped to them.
             RECT rc;
             GetWindowRect(child, &rc);
-            const int radius = Px(child, 10);
+            const int diameter = 2 * Px(child, kRadius);
             SetWindowRgn(child, CreateRoundRectRgn(0, 0, rc.right - rc.left + 1,
-                                                   rc.bottom - rc.top + 1, radius, radius), TRUE);
-        }
-        else if (ClassIs(child, L"Button") &&
-                 (GetWindowLongW(child, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX)
+                                                   rc.bottom - rc.top + 1, diameter, diameter), TRUE);
+        } else if (IsGroupBox(child)) {
             SetWindowSubclass(child, GroupBoxProc, 1, 0);
+        }
     }
 }
 
@@ -377,21 +485,31 @@ bool Handle(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam, INT_PTR& result)
         result = reinterpret_cast<INT_PTR>(BgBrush());
         return true;
 
+    case WM_ERASEBKGND:
+        PaintBackground(dlg, reinterpret_cast<HDC>(wParam));
+        SetWindowLongPtrW(dlg, DWLP_MSGRESULT, TRUE);
+        result = TRUE;
+        return true;
+
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLORBTN: {
         HDC dc = reinterpret_cast<HDC>(wParam);
-        SetTextColor(dc, kText);
-        SetBkColor(dc, kBg);
-        result = reinterpret_cast<INT_PTR>(BgBrush());
+        HWND ctl = reinterpret_cast<HWND>(lParam);
+        const bool onCard = BackOf(ctl) == kCard;
+        SetTextColor(dc, IsWindowEnabled(ctl) ? kText : kDisabled);
+        SetBkColor(dc, onCard ? kCard : kBg);
+        result = reinterpret_cast<INT_PTR>(onCard ? CardBrush() : BgBrush());
         return true;
     }
 
     case WM_CTLCOLORLISTBOX:
     case WM_CTLCOLOREDIT: {
+        if (!g_listBrush)
+            g_listBrush = CreateSolidBrush(kList);
         HDC dc = reinterpret_cast<HDC>(wParam);
         SetTextColor(dc, kText);
-        SetBkColor(dc, kCard);
-        result = reinterpret_cast<INT_PTR>(CardBrush());
+        SetBkColor(dc, kList);
+        result = reinterpret_cast<INT_PTR>(g_listBrush);
         return true;
     }
 

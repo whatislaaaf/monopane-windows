@@ -10,6 +10,7 @@
 #include "darkui.h"
 #include "keysettings.h"
 #include "lock.h"
+#include "paint.h"
 #include "../res/resource.h"
 
 Settings g_settings;
@@ -246,25 +247,21 @@ void PaintTabStrip(HWND dlg, HostState* st)
 
     HGDIOBJ old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(dlg, WM_GETFONT, 0, 0)));
     SetBkMode(dc, TRANSPARENT);
-    const int underline = dark::Px(dlg, 2);
+    // Windows 11's selector bar: the current name in full white with a short
+    // rounded accent bar centred under it, the others dimmed.
+    const int barW = dark::Px(dlg, 16);
+    const int barH = dark::Px(dlg, 3);
     for (int i = 0; i < kTabCount; ++i) {
         const bool current = st && i == st->selected;
         SetTextColor(dc, current ? dark::kText : dark::kDim);
         DrawTextW(dc, kTabNames[i], -1, &tabs[i], DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         if (current) {
-            RECT line{ tabs[i].left, tabs[i].bottom - underline, tabs[i].right, tabs[i].bottom };
-            HBRUSH accent = CreateSolidBrush(dark::kAccent);
-            FillRect(dc, &line, accent);
-            DeleteObject(accent);
+            const int cx = (tabs[i].left + tabs[i].right) / 2;
+            const RECT bar{ cx - barW / 2, tabs[i].bottom - barH - dark::Px(dlg, 2),
+                            cx + barW / 2, tabs[i].bottom - dark::Px(dlg, 2) };
+            FillRoundRectAA(dc, bar, barH / 2, dark::Accent(), dark::kBg);
         }
     }
-    // A hairline under the whole strip, which the accent sits on.
-    RECT client;
-    GetClientRect(dlg, &client);
-    RECT rule{ tabs[0].left, tabs[0].bottom, client.right - tabs[0].left, tabs[0].bottom + 1 };
-    HBRUSH line = CreateSolidBrush(dark::kLine);
-    FillRect(dc, &rule, line);
-    DeleteObject(line);
     SelectObject(dc, old);
     EndPaint(dlg, &ps);
 }

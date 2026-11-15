@@ -64,3 +64,43 @@ void FillRoundRectAA(HDC dc, const RECT& rc, int radius, COLORREF fill, COLORREF
         }
     }
 }
+
+void OutlineRoundRectAA(HDC dc, const RECT& rc, int radius, COLORREF fill, COLORREF line,
+                        COLORREF back)
+{
+    FillRoundRectAA(dc, rc, radius, line, back);
+    RECT inner = rc;
+    InflateRect(&inner, -1, -1);
+    FillRoundRectAA(dc, inner, radius > 0 ? radius - 1 : 0, fill, line);
+}
+
+COLORREF SystemAccentLight()
+{
+    BYTE palette[32] = {};
+    DWORD size = sizeof(palette);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent",
+                     L"AccentPalette", RRF_RT_REG_BINARY, nullptr, palette, &size) ==
+            ERROR_SUCCESS &&
+        size >= 8)
+        return RGB(palette[4], palette[5], palette[6]);
+    return RGB(76, 194, 255);
+}
+
+bool FontInstalled(const wchar_t* face)
+{
+    LOGFONTW lf{};
+    lf.lfCharSet = DEFAULT_CHARSET;
+    wcsncpy_s(lf.lfFaceName, face, LF_FACESIZE - 1);
+    bool found = false;
+    HDC dc = GetDC(nullptr);
+    EnumFontFamiliesExW(
+        dc, &lf,
+        [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM out) -> int {
+            *reinterpret_cast<bool*>(out) = true;
+            return 0;
+        },
+        reinterpret_cast<LPARAM>(&found), 0);
+    ReleaseDC(nullptr, dc);
+    return found;
+}

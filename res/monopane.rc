@@ -22,30 +22,30 @@ IDD_TAB_SWITCHER DIALOGEX 0, 0, 400, 244
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Hotkeys", -1, 8, 6, 384, 75
-    LTEXT           "Open the switcher", -1, 16, 22, 72, 8
-    LTEXT           "", IDC_TXT_HOTKEY, 92, 21, 226, 12
-    PUSHBUTTON      "Set...", IDC_BTN_HOTKEY, 326, 19, 54, 14
-    LTEXT           "Rotate the display", -1, 16, 41, 72, 8
-    LTEXT           "", IDC_TXT_ROTATE, 92, 40, 226, 12
-    PUSHBUTTON      "Set...", IDC_BTN_ROTATE, 326, 38, 54, 14
-    LTEXT           "", IDC_TXT_HOTKEY_HINT, 16, 58, 364, 20
+    GROUPBOX        "Hotkeys", -1, 8, 2, 384, 80
+    LTEXT           "Open the switcher", -1, 18, 23, 72, 8
+    LTEXT           "", IDC_TXT_HOTKEY, 94, 22, 224, 12
+    PUSHBUTTON      "Set...", IDC_BTN_HOTKEY, 326, 20, 56, 14
+    LTEXT           "Rotate the display", -1, 18, 41, 72, 8
+    LTEXT           "", IDC_TXT_ROTATE, 94, 40, 224, 12
+    PUSHBUTTON      "Set...", IDC_BTN_ROTATE, 326, 38, 56, 14
+    LTEXT           "", IDC_TXT_HOTKEY_HINT, 18, 58, 364, 20
 
-    GROUPBOX        "When activating a window", -1, 8, 87, 384, 42
+    GROUPBOX        "When activating a window", -1, 8, 90, 384, 46
     CONTROL         "Bring all windows of the same app forward", IDC_CHK_ACTIVATE_ALL,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 101, 360, 10
-    LTEXT           "Off: only the selected window is activated.", -1, 27, 114, 350, 8
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 108, 360, 10
+    LTEXT           "Off: only the selected window is activated.", -1, 31, 121, 350, 8
 
-    GROUPBOX        "Switcher", -1, 8, 135, 384, 42
+    GROUPBOX        "Switcher", -1, 8, 144, 384, 46
     CONTROL         "Preselect the previously active window", IDC_CHK_PRESELECT,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 149, 360, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 162, 360, 10
     CONTROL         "Match app names when searching, not just titles", IDC_CHK_MATCH_APP,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 163, 360, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 175, 360, 10
 
-    GROUPBOX        "Search memory", -1, 8, 183, 384, 36
+    GROUPBOX        "Search memory", -1, 8, 198, 384, 40
     LTEXT           "Monopane remembers which app you pick for each search.",
-                    -1, 16, 196, 260, 8
-    PUSHBUTTON      "Clear search memory", IDC_BTN_CLEAR_MEMORY, 290, 193, 90, 14
+                    -1, 18, 221, 260, 8
+    PUSHBUTTON      "Clear search memory", IDC_BTN_CLEAR_MEMORY, 290, 217, 92, 14
 END
 
 IDD_TAB_KEYS DIALOGEX 0, 0, 400, 244
@@ -69,26 +69,26 @@ IDD_TAB_KEYOPTIONS DIALOGEX 0, 0, 400, 244
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Hotkeys on the key map", -1, 8, 6, 384, 106
-    LISTBOX         IDC_LST_CHORDS, 16, 20, 288, 66,
+    GROUPBOX        "Hotkeys on the key map", -1, 8, 2, 384, 110
+    LISTBOX         IDC_LST_CHORDS, 18, 22, 286, 62,
                     LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Add...", IDC_BTN_CHORD_ADD, 310, 20, 70, 14
-    PUSHBUTTON      "Set keys...", IDC_BTN_CHORD_SET, 310, 38, 70, 14
-    PUSHBUTTON      "Remove", IDC_BTN_CHORD_DEL, 310, 56, 70, 14
-    LTEXT           "", IDC_TXT_CHORD_HINT, 16, 92, 364, 16
+    PUSHBUTTON      "Add...", IDC_BTN_CHORD_ADD, 312, 22, 70, 14
+    PUSHBUTTON      "Set keys...", IDC_BTN_CHORD_SET, 312, 40, 70, 14
+    PUSHBUTTON      "Remove", IDC_BTN_CHORD_DEL, 312, 58, 70, 14
+    LTEXT           "", IDC_TXT_CHORD_HINT, 18, 90, 364, 16
 
-    GROUPBOX        "Keyboard", -1, 8, 118, 384, 40
-    LTEXT           "Board:", -1, 16, 134, 26, 8
-    COMBOBOX        IDC_CMB_BOARD, 44, 131, 100, 60,
+    GROUPBOX        "Keyboard", -1, 8, 120, 384, 44
+    LTEXT           "Board:", -1, 18, 146, 26, 8
+    COMBOBOX        IDC_CMB_BOARD, 46, 143, 100, 60,
                     CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Layout:", -1, 154, 134, 28, 8
-    COMBOBOX        IDC_CMB_LAYOUT, 184, 131, 66, 60,
+    LTEXT           "Layout:", -1, 156, 146, 28, 8
+    COMBOBOX        IDC_CMB_LAYOUT, 186, 143, 66, 60,
                     CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Reset all keys to defaults", IDC_BTN_RESETDEFAULTS, 270, 131, 110, 14
+    PUSHBUTTON      "Reset all keys to defaults", IDC_BTN_RESETDEFAULTS, 270, 142, 112, 14
 
-    GROUPBOX        "Kernel Scancode Map", -1, 8, 164, 384, 62
-    LTEXT           "", IDC_TXT_SCMAP, 16, 178, 300, 42
-    PUSHBUTTON      "Remove", IDC_BTN_SCMAP_RESET, 320, 178, 60, 14
+    GROUPBOX        "Kernel Scancode Map", -1, 8, 172, 384, 66
+    LTEXT           "", IDC_TXT_SCMAP, 18, 192, 296, 40
+    PUSHBUTTON      "Remove", IDC_BTN_SCMAP_RESET, 322, 192, 60, 14
 END
 
 VS_VERSION_INFO VERSIONINFO

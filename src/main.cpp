@@ -120,39 +120,6 @@ bool MouseActuallyMoved(HWND hwnd, POINT client)
     return true;
 }
 
-bool FontInstalled(const wchar_t* face)
-{
-    LOGFONTW lf{};
-    lf.lfCharSet = DEFAULT_CHARSET;
-    wcscpy_s(lf.lfFaceName, face);
-    bool found = false;
-    HDC dc = GetDC(nullptr);
-    EnumFontFamiliesExW(
-        dc, &lf,
-        [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM found) -> int {
-            *reinterpret_cast<bool*>(found) = true;
-            return 0;
-        },
-        reinterpret_cast<LPARAM>(&found), 0);
-    ReleaseDC(nullptr, dc);
-    return found;
-}
-
-// The light shade of the user's accent colour, as Windows 11 draws it on dark
-// surfaces. The shell keeps the whole ramp in AccentPalette, lightest first.
-COLORREF ReadAccentLight()
-{
-    BYTE palette[32] = {};
-    DWORD size = sizeof(palette);
-    if (RegGetValueW(HKEY_CURRENT_USER,
-                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent",
-                     L"AccentPalette", RRF_RT_REG_BINARY, nullptr, palette, &size) ==
-            ERROR_SUCCESS &&
-        size >= 8)
-        return RGB(palette[4], palette[5], palette[6]);
-    return CLR_ACCENT_FALLBACK;
-}
-
 void CreateFonts()
 {
     if (g_fontApp) DeleteObject(g_fontApp);
@@ -336,7 +303,7 @@ void HideOverlay()
 void ShowOverlay()
 {
     SetIconSizePx(Scale(BASE_ICON));
-    g_accent = ReadAccentLight();  // the user may have changed it since last time
+    g_accent = SystemAccentLight();  // the user may have changed it since last time
     g_windows = EnumerateAltTabWindows();
     SetWindowTextW(g_hwndEdit, L"");
     ApplyFilter();
@@ -1023,7 +990,7 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         g_editBaseProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
             g_hwndEdit, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(EditSubclassProc)));
 
-        g_accent = ReadAccentLight();
+        g_accent = SystemAccentLight();
         CreateFonts();
         return 0;
     }
