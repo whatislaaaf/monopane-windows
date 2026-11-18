@@ -7,8 +7,8 @@
 enum class BoardLayout : uint8_t { Auto = 0, Ansi, Iso };
 
 // Which keyboard the picker draws. Only the picture changes: bindings are by
-// scancode either way, so a config carries over between the two unchanged.
-enum class BoardShape : uint8_t { Full = 0, MxKeysMiniMac };
+// scancode either way, so a config carries over between them unchanged.
+enum class BoardShape : uint8_t { Full = 0, MxKeysMiniMac, FalchionRxLowProfile };
 
 struct Config {
     // Indexed by KeySlot(). `base` applies always; `nav` applies only while a

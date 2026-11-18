@@ -149,7 +149,7 @@ Monopane to reload.
 ```ini
 [options]
 layout           = auto      # auto | ansi | iso
-board            = full      # full | mx-keys-mini
+board            = full      # full | mx-keys-mini | falchion-rx-lp
 
 [base]
 3A = key:0E               # Caps Lock -> Backspace
@@ -181,9 +181,11 @@ is wrong.
 
 `board` picks its shape: `full` is a full-size board with a nav cluster,
 `mx-keys-mini` the Logitech MX Keys Mini for Mac (control, option, cmd and
-fn along the bottom, a short function row and half-height arrows). Bindings are by scancode
-either way, so switching it only changes the picture. Both are on the Key
-options tab too.
+fn along the bottom, a short function row and half-height arrows), and
+`falchion-rx-lp` the ASUS ROG Falchion RX Low Profile (68 keys, with Ins, Del,
+PgUp and PgDn down the right-hand column). Bindings are by scancode either way,
+so switching it only changes the picture. All three are on the Key options tab
+too.
 
 ### Win+L and the Scancode Map
 

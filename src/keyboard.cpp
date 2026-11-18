@@ -5,6 +5,7 @@
 #include "darkui.h"
 
 #include <algorithm>
+#include <iterator>
 
 #include <vector>
 
@@ -238,6 +239,95 @@ const KeyCap kMiniBoard[] = {
 
 constexpr int kMiniBoardW = 1500;
 constexpr int kMiniBoardH = 579;
+
+// The ROG Falchion RX Low Profile, measured off ASUS's top-down render: 68 keys
+// over 15.75 units, with Ins, Del, PgUp and PgDn down the right-hand column.
+// Backspace is 1.75u, backslash 1.25u, return 2u, the right shift 1.5u and the
+// space 5.25u, with seven 1.25u modifiers around it. Only the ANSI board is
+// drawn, so the layout setting does not change this picture. Fn is handled in
+// the keyboard; the touch strip and multi-function button are not keys.
+const KeyCap kFalchionBoard[] = {
+    // number row
+    { 0x01,   L"Esc",     0,    0,   100, 100, KCF_NONE },
+    { 0x02,   L"1",       100,  0,   100, 100, KCF_NONE },
+    { 0x03,   L"2",       200,  0,   100, 100, KCF_NONE },
+    { 0x04,   L"3",       300,  0,   100, 100, KCF_NONE },
+    { 0x05,   L"4",       400,  0,   100, 100, KCF_NONE },
+    { 0x06,   L"5",       500,  0,   100, 100, KCF_NONE },
+    { 0x07,   L"6",       600,  0,   100, 100, KCF_NONE },
+    { 0x08,   L"7",       700,  0,   100, 100, KCF_NONE },
+    { 0x09,   L"8",       800,  0,   100, 100, KCF_NONE },
+    { 0x0A,   L"9",       900,  0,   100, 100, KCF_NONE },
+    { 0x0B,   L"0",       1000, 0,   100, 100, KCF_NONE },
+    { 0x0C,   L"-",       1100, 0,   100, 100, KCF_NONE },
+    { 0x0D,   L"=",       1200, 0,   100, 100, KCF_NONE },
+    { 0x0E,   L"Bksp",    1300, 0,   175, 100, KCF_NONE },
+    { 0xE052, L"Ins",     1475, 0,   100, 100, KCF_NONE },
+
+    // top letter row
+    { 0x0F,   L"Tab",     0,    100, 150, 100, KCF_NONE },
+    { 0x10,   L"Q",       150,  100, 100, 100, KCF_NONE },
+    { 0x11,   L"W",       250,  100, 100, 100, KCF_NONE },
+    { 0x12,   L"E",       350,  100, 100, 100, KCF_NONE },
+    { 0x13,   L"R",       450,  100, 100, 100, KCF_NONE },
+    { 0x14,   L"T",       550,  100, 100, 100, KCF_NONE },
+    { 0x15,   L"Y",       650,  100, 100, 100, KCF_NONE },
+    { 0x16,   L"U",       750,  100, 100, 100, KCF_NONE },
+    { 0x17,   L"I",       850,  100, 100, 100, KCF_NONE },
+    { 0x18,   L"O",       950,  100, 100, 100, KCF_NONE },
+    { 0x19,   L"P",       1050, 100, 100, 100, KCF_NONE },
+    { 0x1A,   L"[",       1150, 100, 100, 100, KCF_NONE },
+    { 0x1B,   L"]",       1250, 100, 100, 100, KCF_NONE },
+    { 0x2B,   L"\\",      1350, 100, 125, 100, KCF_NONE },
+    { 0xE053, L"Del",     1475, 100, 100, 100, KCF_NONE },
+
+    // home row
+    { 0x3A,   L"Caps",    0,    200, 175, 100, KCF_NONE },
+    { 0x1E,   L"A",       175,  200, 100, 100, KCF_NONE },
+    { 0x1F,   L"S",       275,  200, 100, 100, KCF_NONE },
+    { 0x20,   L"D",       375,  200, 100, 100, KCF_NONE },
+    { 0x21,   L"F",       475,  200, 100, 100, KCF_NONE },
+    { 0x22,   L"G",       575,  200, 100, 100, KCF_NONE },
+    { 0x23,   L"H",       675,  200, 100, 100, KCF_NONE },
+    { 0x24,   L"J",       775,  200, 100, 100, KCF_NONE },
+    { 0x25,   L"K",       875,  200, 100, 100, KCF_NONE },
+    { 0x26,   L"L",       975,  200, 100, 100, KCF_NONE },
+    { 0x27,   L";",       1075, 200, 100, 100, KCF_NONE },
+    { 0x28,   L"'",       1175, 200, 100, 100, KCF_NONE },
+    { 0x1C,   L"Enter",   1275, 200, 200, 100, KCF_NONE },
+    { 0xE049, L"PgUp",    1475, 200, 100, 100, KCF_NONE },
+
+    // bottom letter row
+    { 0x2A,   L"Shift",   0,    300, 225, 100, KCF_NONE },
+    { 0x2C,   L"Z",       225,  300, 100, 100, KCF_NONE },
+    { 0x2D,   L"X",       325,  300, 100, 100, KCF_NONE },
+    { 0x2E,   L"C",       425,  300, 100, 100, KCF_NONE },
+    { 0x2F,   L"V",       525,  300, 100, 100, KCF_NONE },
+    { 0x30,   L"B",       625,  300, 100, 100, KCF_NONE },
+    { 0x31,   L"N",       725,  300, 100, 100, KCF_NONE },
+    { 0x32,   L"M",       825,  300, 100, 100, KCF_NONE },
+    { 0x33,   L",",       925,  300, 100, 100, KCF_NONE },
+    { 0x34,   L".",       1025, 300, 100, 100, KCF_NONE },
+    { 0x35,   L"/",       1125, 300, 100, 100, KCF_NONE },
+    { 0x36,   L"Shift",   1225, 300, 150, 100, KCF_NONE },
+    { 0xE048, L"\x2191",  1375, 300, 100, 100, KCF_NONE },
+    { 0xE051, L"PgDn",    1475, 300, 100, 100, KCF_NONE },
+
+    // modifier row
+    { 0x1D,   L"Ctrl",    0,    400, 125, 100, KCF_NONE },
+    { 0xE05B, L"Win",     125,  400, 125, 100, KCF_NONE },
+    { 0x38,   L"Alt",     250,  400, 125, 100, KCF_NONE },
+    { 0x39,   L"Space",   375,  400, 525, 100, KCF_NONE },
+    { 0xE038, L"Alt",     900,  400, 125, 100, KCF_NONE },
+    { kNoKey, L"Fn",      1025, 400, 125, 100, KCF_UNBINDABLE },
+    { 0xE01D, L"Ctrl",    1150, 400, 125, 100, KCF_NONE },
+    { 0xE04B, L"\x2190",  1275, 400, 100, 100, KCF_NONE },
+    { 0xE050, L"\x2193",  1375, 400, 100, 100, KCF_NONE },
+    { 0xE04D, L"\x2192",  1475, 400, 100, 100, KCF_NONE },
+};
+
+constexpr int kFalchionBoardW = 1575;
+constexpr int kFalchionBoardH = 500;
 
 
 std::vector<KeyCap> g_ansi;
@@ -808,6 +898,10 @@ LRESULT CALLBACK KeyboardWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
 Board BoardKeys(BoardShape shape, BoardLayout layout)
 {
+    if (shape == BoardShape::FalchionRxLowProfile)
+        return Board{ kFalchionBoard, static_cast<int>(std::size(kFalchionBoard)),
+                      kFalchionBoardW, kFalchionBoardH };
+
     BuildFilteredBoards();
     const bool iso = layout == BoardLayout::Iso;
     const bool mini = shape == BoardShape::MxKeysMiniMac;

@@ -187,6 +187,8 @@ INT_PTR CALLBACK OptionsTabProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam
                             reinterpret_cast<LPARAM>(L"Full-size"));
         SendDlgItemMessageW(dlg, IDC_CMB_BOARD, CB_ADDSTRING, 0,
                             reinterpret_cast<LPARAM>(L"MX Keys Mini for Mac"));
+        SendDlgItemMessageW(dlg, IDC_CMB_BOARD, CB_ADDSTRING, 0,
+                            reinterpret_cast<LPARAM>(L"ROG Falchion RX Low Profile"));
         SendDlgItemMessageW(dlg, IDC_CMB_BOARD, CB_SETCURSEL,
                             static_cast<WPARAM>(st->work.board), 0);
 
