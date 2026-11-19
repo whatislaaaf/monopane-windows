@@ -176,7 +176,7 @@ void CreateFonts()
 // The pill the search box is drawn as, centred in the header band.
 RECT SearchPlateRect()
 {
-    const int inset = Scale(BASE_CONTENT_INSET);
+    const int inset = Scale(BASE_SEARCH_INSET);
     const int boxH = Scale(BASE_SEARCH_BOX_H);
     const int top = (Scale(BASE_HEADER_H) - boxH) / 2;
     return RECT{ inset, top, Scale(BASE_PANEL_WIDTH) - inset, top + boxH };
@@ -551,6 +551,14 @@ LRESULT CALLBACK EditSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 {
     switch (msg) {
     case WM_KEYDOWN:
+        // Backspace or Delete with nothing left to delete is Esc. Only on a
+        // fresh press (bit 30 is the key's previous state), so holding
+        // Backspace to clear a search stops at the empty box.
+        if ((wParam == VK_BACK || wParam == VK_DELETE) && !(lParam & (1 << 30)) &&
+            GetWindowTextLengthW(hwnd) == 0) {
+            HandleNavigationKey(VK_ESCAPE);
+            return 0;
+        }
         if (HandleNavigationKey(wParam))
             return 0;
         break;

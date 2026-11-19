@@ -29,11 +29,10 @@ constexpr COLORREF CLR_ACCENT_FALLBACK = RGB(76, 194, 255);
 // Base (96-dpi) metrics, on a 4px grid, and the same in both panels. Two
 // vertical lines run down each panel:
 //
-//   16px in: the edge of every highlight (a selected row, a selected tile),
-//            and the launchpad's "Pinned" heading and Edit button, which
-//            line up with its tiles' highlights;
-//   32px in: the search box, and in the switcher the section heading and
-//            each row's icon.
+//   16px in: the search box, the edge of every highlight (a selected row, a
+//            selected tile), and the launchpad's "Pinned" heading and Edit
+//            button, which line up with its tiles' highlights;
+//   32px in: in the switcher, the section heading and each row's icon.
 //
 // Down the panel: the 64px header band (a 32px search box with 16px above and
 // below), the section heading (a 40px band in the switcher; the launchpad's
@@ -47,6 +46,7 @@ constexpr COLORREF CLR_ACCENT_FALLBACK = RGB(76, 194, 255);
 constexpr int BASE_PANEL_WIDTH = 668;
 constexpr int BASE_HEADER_H = 64;
 constexpr int BASE_SEARCH_BOX_H = 32;
+constexpr int BASE_SEARCH_INSET = 16;     // panel side to the search box
 constexpr int BASE_SECTION_H = 40;
 constexpr int BASE_HIGHLIGHT_INSET = 16;  // panel side to a highlight's edge
 constexpr int BASE_CONTENT_INSET = 32;    // panel side to content

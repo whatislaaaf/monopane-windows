@@ -475,7 +475,7 @@ RECT EditButtonRect()
 
 RECT SearchPlateRect()
 {
-    const int inset = Scale(BASE_CONTENT_INSET);
+    const int inset = Scale(BASE_SEARCH_INSET);
     const int boxH = Scale(BASE_SEARCH_BOX_H);
     const int top = (Scale(BASE_HEADER_H) - boxH) / 2;
     return RECT{ inset, top, PanelWidth() - inset, top + boxH };
@@ -1431,6 +1431,16 @@ LRESULT CALLBACK SearchEditProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 {
     switch (msg) {
     case WM_KEYDOWN:
+        // Backspace or Delete with nothing left to delete is Esc, as in the
+        // switcher; Delete still removes the selected tile in edit mode. Only
+        // on a fresh press (bit 30 is the key's previous state), so holding
+        // Backspace to clear a search stops at the empty box.
+        if ((wParam == VK_BACK || wParam == VK_DELETE) && !(lParam & (1 << 30)) &&
+            GetWindowTextLengthW(hwnd) == 0) {
+            if (!HandleKey(wParam))
+                HandleKey(VK_ESCAPE);
+            return 0;
+        }
         if (HandleKey(wParam))
             return 0;
         break;
