@@ -228,6 +228,24 @@ int PinnedIndexOf(const std::wstring& target)
     return -1;
 }
 
+bool SameNonEmpty(const std::wstring& a, const std::wstring& b)
+{
+    return !a.empty() && !b.empty() && SameTarget(a, b);
+}
+
+// Whether an installed app is one already pinned: the same entry, or another
+// way to the same program. A pin of steam.exe and the Start menu's Steam
+// shortcut run the same executable; a Store app is the same AppUserModelID.
+bool InstalledIsPinned(const InstalledApp& installed)
+{
+    for (const LaunchpadApp& app : g_apps)
+        if (SameTarget(app.target, installed.target) ||
+            SameNonEmpty(app.exePath, installed.exePath) ||
+            SameNonEmpty(app.aumid, installed.aumid))
+            return true;
+    return false;
+}
+
 // An installed app as a launchpad entry, resolved at grid size the first time
 // it is asked for.
 const LaunchpadApp& ResolvedApp(const InstalledApp& installed)
@@ -531,7 +549,8 @@ void ApplyFilter(bool resetSelection)
             g_filtered.push_back(i);
     } else {
         // Pinned and installed apps together, best first; an installed app
-        // that is also pinned counts once, as the pinned one.
+        // that runs the same program as a pin counts once, as the pin,
+        // whatever either is called.
         const std::wstring aliasTarget = LookupAlias(g_query);
         constexpr int kAliasBoost = 1 << 20;
         struct Scored {
@@ -548,7 +567,7 @@ void ApplyFilter(bool resetSelection)
                 scored.push_back({ score, Result{ i, -1 } });
         }
         for (int i = 0; i < static_cast<int>(g_all.size()); ++i) {
-            if (PinnedIndexOf(g_all[i].target) >= 0)
+            if (InstalledIsPinned(g_all[i]))
                 continue;
             const int score = FuzzyScore(g_query, g_all[i].name);
             if (score >= 0)
