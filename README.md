@@ -296,7 +296,7 @@ left one by scancode.
 
 Laid out like the Windows 11 Start menu, on the monitor with the cursor: a
 search box in the header, then **Pinned**, an eight-wide grid of your apps.
-The search box sits on the same line as the switcher's, the middle of the
+The search box sits on the same line as the switcher's, 40% of the way down the
 screen, and the panel is as tall as the grid needs.
 
 Type to search, and the grid becomes **Best matches** from your pinned apps

@@ -271,7 +271,7 @@ void LayoutOverlay(bool reposition)
     MONITORINFO mi{ sizeof(mi) };
     GetMonitorInfoW(monitor, &mi);
 
-    // The search box sits on the middle of the work area and the list hangs
+    // The search box sits 40% of the way down the work area and the list hangs
     // below it. The top is fixed whatever the list is doing, so nothing creeps
     // up the screen as a search narrows it.
     const int top = PanelTop(mi.rcWork, SearchPlateRect());

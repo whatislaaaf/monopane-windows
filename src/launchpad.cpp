@@ -656,7 +656,7 @@ void Layout(bool reposition)
     GetMonitorInfoW(monitor, &mi);
     const RECT& work = mi.rcWork;
 
-    // The search box sits on the middle of the work area, the same line the
+    // The search box sits 40% of the way down the work area, the same line the
     // switcher puts its own on, and the grid hangs below it. The top is fixed
     // whatever the grid is doing, so the box holds still as a search narrows
     // it, and when the switcher opens instead. The panel is as tall as the

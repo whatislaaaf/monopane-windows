@@ -55,8 +55,13 @@ constexpr int BASE_BOTTOM_PAD = 16;
 constexpr int BASE_SCREEN_MARGIN = 24;    // the least a panel keeps off the screen's bottom
 constexpr int BASE_ROW_RADIUS = 4;        // what Windows 11 rounds list items by
 
+// How far down the work area the search box's middle sits, in percent: a
+// little above centre, so the list or grid under it has more room and the box
+// sits nearer where the eye starts.
+constexpr int SEARCH_LINE_PERCENT = 40;
+
 // Where to put the top of a panel whose search plate is `plate`, so that the
-// plate's middle lands on the middle of `work`.
+// plate's middle lands SEARCH_LINE_PERCENT of the way down `work`.
 //
 // Both overlays anchor on the search box rather than on the frame, because the
 // search box is the part that has to hold still: the frame is a different
@@ -65,7 +70,8 @@ constexpr int BASE_ROW_RADIUS = 4;        // what Windows 11 rounds list items b
 // jump 76 pixels between the two.
 inline int PanelTop(const RECT& work, const RECT& plate)
 {
-    return work.top + (work.bottom - work.top) / 2 - (plate.top + plate.bottom) / 2;
+    return work.top + (work.bottom - work.top) * SEARCH_LINE_PERCENT / 100 -
+           (plate.top + plate.bottom) / 2;
 }
 
 // How many rows of `rowH` fit below the top `listTop` pixels of a panel at
