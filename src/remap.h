@@ -46,6 +46,13 @@ void ReleaseAll();
 // The hook thread registers itself here; until it has, the requests are
 // dropped, which is fine because ReloadConfig runs when it starts anyway.
 void BindHookThread(DWORD threadId);
+
+// A launchpad chord posts `msg` to `hwnd`. The chord is matched here, in the
+// key map, rather than among the switcher's hotkeys: on the physical keys,
+// whatever the map turns them into, and in the one list where a chord already
+// taken by another action shows up.
+void SetLaunchpadTarget(HWND hwnd, UINT msg);
+
 void RequestReload();
 void RequestPause(bool paused);
 void RequestRelease();

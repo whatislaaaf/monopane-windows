@@ -1,10 +1,15 @@
 #pragma once
 #include <windows.h>
 
-// The switcher's chrome, after the Windows 11 Start menu's search: a header
-// band holding a pill-shaped search box, a hairline under it, and a lighter
-// body below with a section heading over the list. The colours are the Start
-// menu's own in dark mode, read off its pixels.
+// The chrome the switcher and the launchpad share, after the Windows 11 Start
+// menu: a header band holding a pill-shaped search box, a hairline under it,
+// and a lighter body below with a section heading over its contents. The
+// colours are the Start menu's own in dark mode, read off its pixels.
+//
+// The two are one panel with two kinds of contents, and switching between
+// them should not look like moving between two different windows: same
+// width, same search box, in the same place on screen. What differs is only
+// what hangs below the search box — a list of windows, or a grid of apps.
 
 // Palette.
 constexpr COLORREF CLR_HEADER_BG = RGB(33, 33, 33);     // the band the search box sits in
@@ -21,22 +26,43 @@ constexpr COLORREF CLR_TEXT_HINT = RGB(150, 150, 150);  // the search box's plac
 // (the selection pill, the search glyph). The default blue's is #4CC2FF.
 constexpr COLORREF CLR_ACCENT_FALLBACK = RGB(76, 194, 255);
 
-// Base (96-dpi) metrics of the panel itself.
-constexpr int BASE_PANEL_WIDTH = 680;
-constexpr int BASE_HEADER_H = 68;    // the band: search box plus 16px above and below
-constexpr int BASE_SEARCH_INSET = 16;
-constexpr int BASE_SEARCH_BOX_H = 36;
-constexpr int BASE_SECTION_H = 40;   // the "Open windows" heading
-constexpr int BASE_BOTTOM_PAD = 8;
-constexpr int BASE_ROW_INSET = 8;    // a row's highlight, in from the panel's sides
-constexpr int BASE_ROW_RADIUS = 4;   // what Windows 11 rounds list items by
+// Base (96-dpi) metrics, on a 4px grid, and the same in both panels. Two
+// vertical lines run down each panel:
+//
+//   16px in: the edge of every highlight (a selected row, a selected tile),
+//            and the launchpad's "Pinned" heading and Edit button, which
+//            line up with its tiles' highlights;
+//   32px in: the search box, and in the switcher the section heading and
+//            each row's icon.
+//
+// Down the panel: the 64px header band (a 32px search box with 16px above and
+// below), the section heading (a 40px band in the switcher; the launchpad's
+// is taller, to hold its Edit button), the rows or tiles, then
+// 16px to the bottom, as much as the highlight keeps off the sides. A
+// highlight stands 2px in from the top and bottom of its row or tile (and the
+// sides of a tile), so neighbouring highlights are 4px apart either way.
+//
+// 668 is the launchpad's eight 80px columns, plus 14px each side so the
+// first and last tiles' highlights land on the 16px line.
+constexpr int BASE_PANEL_WIDTH = 668;
+constexpr int BASE_HEADER_H = 64;
+constexpr int BASE_SEARCH_BOX_H = 32;
+constexpr int BASE_SECTION_H = 40;
+constexpr int BASE_HIGHLIGHT_INSET = 16;  // panel side to a highlight's edge
+constexpr int BASE_CONTENT_INSET = 32;    // panel side to content
+constexpr int BASE_HIGHLIGHT_GAP = 2;     // a highlight, in from its row or tile
+constexpr int BASE_BOTTOM_PAD = 16;
+constexpr int BASE_SCREEN_MARGIN = 24;    // the least a panel keeps off the screen's bottom
+constexpr int BASE_ROW_RADIUS = 4;        // what Windows 11 rounds list items by
 
 // Where to put the top of a panel whose search plate is `plate`, so that the
 // plate's middle lands on the middle of `work`.
 //
-// The panel anchors on the search box rather than on the frame, because the
+// Both overlays anchor on the search box rather than on the frame, because the
 // search box is the part that has to hold still: the frame is a different
-// height every time the list filters down.
+// height in each of them, and a different height again as a list filters down
+// or a grid grows. Anchoring the frame instead is what used to make the box
+// jump 76 pixels between the two.
 inline int PanelTop(const RECT& work, const RECT& plate)
 {
     return work.top + (work.bottom - work.top) / 2 - (plate.top + plate.bottom) / 2;
