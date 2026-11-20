@@ -316,9 +316,8 @@ fresh instance regardless. Search memory works here too.
 - The **✕** on a tile removes it (or select it and press **Delete**)
 - Click a tile's **name** to rename it (or **F2**); Enter commits, Esc reverts,
   and typing the app's own name back clears the custom one
-- The **+** tile adds an app: *Installed app…* lists everything the Start menu
-  knows about, with a search box; *Browse for a file…* takes any `.exe` or
-  `.lnk`
+- The **+** tile adds an app: it opens a dark picker of everything the Start
+  menu knows about, with its search box ready for typing
 
 **Done**, or Esc, leaves edit mode.
 

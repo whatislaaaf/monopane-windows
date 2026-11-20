@@ -2,10 +2,10 @@
 
 #include <windowsx.h>
 #include <commctrl.h>
-#include <commdlg.h>
 #include <dwmapi.h>
 #include <objbase.h>
 #include <shellapi.h>
+#include <uxtheme.h>
 
 #include <algorithm>
 #include <atomic>
@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "aliases.h"
+#include "darkui.h"
 #include "fuzzy.h"
 #include "launchpad_apps.h"
 #include "paint.h"
@@ -53,8 +54,6 @@ static_assert(BASE_TILE_W * COLS + 2 * BASE_GRID_LEFT == BASE_PANEL_WIDTH,
 
 constexpr UINT IDC_SEARCH = 100;
 constexpr UINT IDC_RENAME = 101;
-constexpr UINT IDM_ADD_INSTALLED = 1;
-constexpr UINT IDM_ADD_FILE = 2;
 constexpr UINT IDM_UNPIN = 4;
 constexpr UINT IDM_RENAME = 5;
 
@@ -799,34 +798,33 @@ struct ModalScope {
     }
 };
 
-bool BrowseForFile(std::wstring& pathOut)
-{
-    ModalScope modal;
-    wchar_t path[MAX_PATH] = {};
-    OPENFILENAMEW ofn{ sizeof(ofn) };
-    ofn.hwndOwner = g_hwnd;
-    ofn.lpstrFilter = L"Programs and shortcuts (*.exe;*.lnk)\0*.exe;*.lnk\0All files (*.*)\0*.*\0";
-    ofn.lpstrFile = path;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrTitle = L"Add to the launchpad";
-    // NODEREFERENCELINKS keeps a picked shortcut as the shortcut, whose name
-    // and icon are usually the better ones.
-    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NODEREFERENCELINKS |
-                OFN_HIDEREADONLY;
-    if (!GetOpenFileNameW(&ofn))
-        return false;
-    pathOut = path;
-    return true;
-}
-
 // ------------------------------------------------------------ the picker
+//
+// The + tile's list of installed apps, dressed as the launchpad is rather than
+// as a stock dialog: the launchpad's pill-shaped search box with the accent
+// magnifier, and under it rows drawn the way the switcher draws its own, with
+// a rounded wash and a short accent bar on the selected one. Laid out in
+// pixels on the 4px grid; the template only says which controls exist.
+
+void DrawIcon(HDC dc, HBITMAP bitmap, const RECT& box);
+void DrawGlyph(HDC dc, const wchar_t* glyph, const RECT& rc, HFONT font, COLORREF color);
+
+// Base (96-dpi) metrics.
+constexpr int BASE_PICK_W = 480;          // the client area
+constexpr int BASE_PICK_H = 560;
+constexpr int BASE_PICK_MARGIN = 24;      // the window's edge to its contents
+constexpr int BASE_PICK_LIST_GAP = 16;    // the search box to the list
+constexpr int BASE_PICK_FOOTER_GAP = 24;  // the list to the buttons
+constexpr int BASE_PICK_ROW_H = 40;
+constexpr int BASE_PICK_ROW_PAD = 12;     // a row's edge to its icon, the icon to its name
+
+constexpr COLORREF CLR_PICK_SELECTED = RGB(45, 45, 45);  // a white wash of ~6% over dark::kBg
 
 struct PickerState {
-    std::vector<int> imageIndex;   // per g_all entry, or -1
-    HIMAGELIST images = nullptr;
     HWND list = nullptr;
     HWND search = nullptr;
     WNDPROC searchBase = nullptr;
+    RECT plate{};                 // the search box's pill, in client pixels
     std::wstring chosen;
 };
 
@@ -855,102 +853,263 @@ void FillPicker(PickerState& st)
             shown.push_back(index);
     }
 
+    // An owner-drawn list without strings: each item's data is its index
+    // into g_all.
     SendMessageW(st.list, WM_SETREDRAW, FALSE, 0);
-    ListView_DeleteAllItems(st.list);
-    for (int i = 0; i < static_cast<int>(shown.size()); ++i) {
-        LVITEMW item{};
-        item.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_PARAM;
-        item.iItem = i;
-        item.pszText = const_cast<LPWSTR>(g_all[shown[i]].name.c_str());
-        item.iImage = st.imageIndex[shown[i]];
-        item.lParam = shown[i];
-        ListView_InsertItem(st.list, &item);
-    }
+    SendMessageW(st.list, LB_RESETCONTENT, 0, 0);
+    for (int index : shown)
+        SendMessageW(st.list, LB_ADDSTRING, 0, static_cast<LPARAM>(index));
+    if (!shown.empty())
+        SendMessageW(st.list, LB_SETCURSEL, 0, 0);
     SendMessageW(st.list, WM_SETREDRAW, TRUE, 0);
-    if (!shown.empty()) {
-        ListView_SetItemState(st.list, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-        ListView_EnsureVisible(st.list, 0, FALSE);
-    }
+    InvalidateRect(st.list, nullptr, TRUE);
 }
 
 void PickerMoveSelection(PickerState& st, int delta)
 {
-    const int count = ListView_GetItemCount(st.list);
-    if (count == 0)
+    const int count = static_cast<int>(SendMessageW(st.list, LB_GETCOUNT, 0, 0));
+    if (count <= 0)
         return;
-    int current = ListView_GetNextItem(st.list, -1, LVNI_SELECTED);
+    int current = static_cast<int>(SendMessageW(st.list, LB_GETCURSEL, 0, 0));
     if (current < 0)
         current = 0;
-    const int next = std::clamp(current + delta, 0, count - 1);
-    ListView_SetItemState(st.list, next, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-    ListView_EnsureVisible(st.list, next, FALSE);
+    SendMessageW(st.list, LB_SETCURSEL, std::clamp(current + delta, 0, count - 1), 0);
 }
 
 // Up/Down in the search box move the list, so the keyboard never has to
-// leave the box.
+// leave the box; the placeholder is painted here, as the launchpad's is.
 LRESULT CALLBACK PickerSearchProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    const WNDPROC base = g_picker ? g_picker->searchBase : DefWindowProcW;
     if (g_picker && msg == WM_KEYDOWN) {
         if (wParam == VK_DOWN) { PickerMoveSelection(*g_picker, 1); return 0; }
         if (wParam == VK_UP) { PickerMoveSelection(*g_picker, -1); return 0; }
         if (wParam == VK_NEXT) { PickerMoveSelection(*g_picker, 10); return 0; }
         if (wParam == VK_PRIOR) { PickerMoveSelection(*g_picker, -10); return 0; }
     }
-    return CallWindowProcW(g_picker ? g_picker->searchBase : DefWindowProcW, hwnd, msg, wParam,
-                           lParam);
+    if (msg == WM_PAINT) {
+        const LRESULT result = CallWindowProcW(base, hwnd, msg, wParam, lParam);
+        if (GetWindowTextLengthW(hwnd) == 0) {
+            HDC dc = GetDC(hwnd);
+            HideCaret(hwnd);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            rc.left += LOWORD(SendMessageW(hwnd, EM_GETMARGINS, 0, 0)) + 1;
+            HGDIOBJ oldFont = SelectObject(dc, g_fontEdit);
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, CLR_TEXT_HINT);
+            DrawTextW(dc, L"Search installed apps", -1, &rc,
+                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            SelectObject(dc, oldFont);
+            ShowCaret(hwnd);
+            ReleaseDC(hwnd, dc);
+        }
+        return result;
+    }
+    return CallWindowProcW(base, hwnd, msg, wParam, lParam);
+}
+
+// Sizes the window to its client area, centres it over the launchpad's
+// monitor, and puts every control in place.
+void LayoutPicker(HWND dlg, PickerState& st)
+{
+    const auto px = [dlg](int at96) { return dark::Px(dlg, at96); };
+    const int w = px(BASE_PICK_W);
+    const int h = px(BASE_PICK_H);
+    const int margin = px(BASE_PICK_MARGIN);
+
+    RECT window, client;
+    GetWindowRect(dlg, &window);
+    GetClientRect(dlg, &client);
+    const int frameW = (window.right - window.left) - client.right;
+    const int frameH = (window.bottom - window.top) - client.bottom;
+    MONITORINFO mi{ sizeof(mi) };
+    GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+    const RECT& work = mi.rcWork;
+    SetWindowPos(dlg, nullptr, work.left + (work.right - work.left - (w + frameW)) / 2,
+                 work.top + (work.bottom - work.top - (h + frameH)) / 2, w + frameW, h + frameH,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+
+    // The search box: the launchpad's pill, with the typing past the glyph.
+    const int boxH = px(BASE_SEARCH_BOX_H);
+    st.plate = RECT{ margin, margin, w - margin, margin + boxH };
+    const int editH = g_editLineH + px(2);
+    const int editLeft = st.plate.left + px(40);
+    MoveWindow(st.search, editLeft, st.plate.top + (boxH - editH) / 2,
+               (st.plate.right - px(16)) - editLeft, editH, FALSE);
+
+    // The buttons, right-aligned along the bottom.
+    HWND ok = GetDlgItem(dlg, IDOK);
+    HWND cancel = GetDlgItem(dlg, IDCANCEL);
+    const int buttonH = px(dark::kRowH);
+    const int buttonW = std::max(dark::ButtonWidth(ok), dark::ButtonWidth(cancel));
+    const int buttonTop = h - margin - buttonH;
+    MoveWindow(cancel, w - margin - buttonW, buttonTop, buttonW, buttonH, FALSE);
+    MoveWindow(ok, w - margin - 2 * buttonW - px(dark::kGap), buttonTop, buttonW, buttonH, FALSE);
+
+    // The list between them.
+    const int listTop = st.plate.bottom + px(BASE_PICK_LIST_GAP);
+    MoveWindow(st.list, margin, listTop, w - 2 * margin,
+               buttonTop - px(BASE_PICK_FOOTER_GAP) - listTop, FALSE);
+}
+
+void PaintPicker(HWND dlg, PickerState& st)
+{
+    PAINTSTRUCT ps;
+    HDC dc = BeginPaint(dlg, &ps);
+    const RECT& plate = st.plate;
+    OutlineRoundRectAA(dc, plate, (plate.bottom - plate.top) / 2, CLR_SEARCH_BG,
+                       CLR_SEARCH_BORDER, dark::kBg);
+    SetBkMode(dc, TRANSPARENT);
+    const RECT glyph{ plate.left + dark::Px(dlg, 10), plate.top,
+                      plate.left + dark::Px(dlg, 34), plate.bottom };
+    DrawGlyph(dc, kGlyphSearch, glyph, g_fontGlyph, g_accent);
+    EndPaint(dlg, &ps);
+}
+
+// One row: the switcher's look, an icon and the app's name, and on the
+// selected row a rounded wash with a short accent bar at its left edge.
+void DrawPickerRow(HWND dlg, const DRAWITEMSTRUCT& di)
+{
+    HDC dc = di.hDC;
+    const RECT& rc = di.rcItem;
+    HBRUSH bg = CreateSolidBrush(dark::kBg);
+    FillRect(dc, &rc, bg);
+    DeleteObject(bg);
+    if (di.itemID == static_cast<UINT>(-1))
+        return;
+
+    const auto px = [dlg](int at96) { return dark::Px(dlg, at96); };
+    const bool selected = (di.itemState & ODS_SELECTED) != 0;
+    if (selected) {
+        RECT wash = rc;
+        InflateRect(&wash, 0, -px(BASE_HIGHLIGHT_GAP));
+        FillRoundRectAA(dc, wash, px(BASE_ROW_RADIUS), CLR_PICK_SELECTED, dark::kBg);
+        const int barH = px(16);
+        const int barTop = rc.top + (rc.bottom - rc.top - barH) / 2;
+        const RECT bar{ wash.left, barTop, wash.left + px(3), barTop + barH };
+        FillRoundRectAA(dc, bar, (bar.right - bar.left) / 2, g_accent, CLR_PICK_SELECTED);
+    }
+
+    const size_t index = static_cast<size_t>(di.itemData);
+    if (index >= g_all.size())
+        return;
+    const InstalledApp& app = g_all[index];
+    const int icon = px(BASE_INSTALLED_ICON);
+    const int pad = px(BASE_PICK_ROW_PAD);
+    const RECT iconBox{ rc.left + pad, rc.top + (rc.bottom - rc.top - icon) / 2,
+                        rc.left + pad + icon, rc.top + (rc.bottom - rc.top - icon) / 2 + icon };
+    DrawIcon(dc, app.icon, iconBox);
+
+    RECT text{ iconBox.right + pad, rc.top, rc.right - pad, rc.bottom };
+    SetBkMode(dc, TRANSPARENT);
+    SelectObject(dc, g_fontRow);
+    SetTextColor(dc, CLR_TEXT);
+    DrawTextW(dc, app.name.c_str(), -1, &text,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+}
+
+void ChoosePickerSelection(HWND dlg, PickerState& st)
+{
+    const LRESULT selected = SendMessageW(st.list, LB_GETCURSEL, 0, 0);
+    if (selected == LB_ERR)
+        return;
+    const size_t index =
+        static_cast<size_t>(SendMessageW(st.list, LB_GETITEMDATA, static_cast<WPARAM>(selected), 0));
+    if (index >= g_all.size())
+        return;
+    st.chosen = g_all[index].target;
+    EndDialog(dlg, IDOK);
 }
 
 INT_PTR CALLBACK PickerDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     PickerState* st = g_picker;
+
+    // Ahead of dark::Handle, which would give them its own colours: the
+    // search box takes the pill's fill, and the list the window's.
+    if (msg == WM_CTLCOLOREDIT) {
+        static HBRUSH searchBrush = CreateSolidBrush(CLR_SEARCH_BG);
+        HDC dc = reinterpret_cast<HDC>(wParam);
+        SetTextColor(dc, CLR_TEXT);
+        SetBkColor(dc, CLR_SEARCH_BG);
+        return reinterpret_cast<INT_PTR>(searchBrush);
+    }
+    if (msg == WM_CTLCOLORLISTBOX) {
+        HDC dc = reinterpret_cast<HDC>(wParam);
+        SetTextColor(dc, CLR_TEXT);
+        SetBkColor(dc, dark::kBg);
+        return reinterpret_cast<INT_PTR>(dark::BgBrush());
+    }
+
+    INT_PTR darkResult = 0;
+    if (dark::Handle(dlg, msg, wParam, lParam, darkResult))
+        return darkResult;
+
     switch (msg) {
     case WM_INITDIALOG: {
         SendMessageW(dlg, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(
             LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP))));
         st->list = GetDlgItem(dlg, IDC_PICK_LIST);
         st->search = GetDlgItem(dlg, IDC_PICK_SEARCH);
+
+        // The fonts first, which the buttons are measured in, then the
+        // layout. dark::Apply clips a list box to rounded corners at the size
+        // it finds it, which is the template's; this one sits on the window's
+        // own colour with nothing to round, so the clip just goes.
+        dark::Apply(dlg);
+        SendMessageW(st->search, WM_SETFONT, reinterpret_cast<WPARAM>(g_fontEdit), FALSE);
+        SendMessageW(st->search, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, 0);
+        LayoutPicker(dlg, *st);
+        SetWindowRgn(st->list, nullptr, TRUE);
+        SendMessageW(st->list, LB_SETITEMHEIGHT, 0, dark::Px(dlg, BASE_PICK_ROW_H));
+
         st->searchBase = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
             st->search, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(PickerSearchProc)));
-        SendMessageW(st->search, EM_SETCUEBANNER, TRUE,
-                     reinterpret_cast<LPARAM>(L"Search installed apps…"));
-
-        // No ILC_MASK: these bitmaps carry their own alpha.
-        st->images = ImageList_Create(g_allPx, g_allPx, ILC_COLOR32, 64, 32);
-        st->imageIndex.assign(g_all.size(), -1);
-        for (size_t i = 0; i < g_all.size(); ++i) {
-            if (g_all[i].icon)
-                st->imageIndex[i] = ImageList_Add(st->images, g_all[i].icon, nullptr);
-        }
-        ListView_SetImageList(st->list, st->images, LVSIL_SMALL);
-        ListView_SetExtendedListViewStyle(st->list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-
-        RECT client;
-        GetClientRect(st->list, &client);
-        LVCOLUMNW column{};
-        column.mask = LVCF_WIDTH;
-        column.cx = client.right - GetSystemMetrics(SM_CXVSCROLL) - 4;
-        ListView_InsertColumn(st->list, 0, &column);
 
         FillPicker(*st);
         SetFocus(st->search);
         return FALSE;
     }
 
+    case WM_MEASUREITEM: {
+        auto* mi = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
+        if (mi->CtlID == IDC_PICK_LIST) {
+            mi->itemHeight = static_cast<UINT>(dark::Px(dlg, BASE_PICK_ROW_H));
+            SetWindowLongPtrW(dlg, DWLP_MSGRESULT, TRUE);
+            return TRUE;
+        }
+        break;
+    }
+
+    case WM_DRAWITEM: {
+        const auto* di = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+        if (di->CtlID == IDC_PICK_LIST) {
+            DrawPickerRow(dlg, *di);
+            SetWindowLongPtrW(dlg, DWLP_MSGRESULT, TRUE);
+            return TRUE;
+        }
+        break;
+    }
+
+    case WM_PAINT:
+        if (st) {
+            PaintPicker(dlg, *st);
+            return TRUE;
+        }
+        break;
+
     case WM_COMMAND:
         if (LOWORD(wParam) == IDC_PICK_SEARCH && HIWORD(wParam) == EN_CHANGE) {
             FillPicker(*st);
             return TRUE;
         }
+        if (LOWORD(wParam) == IDC_PICK_LIST && HIWORD(wParam) == LBN_DBLCLK) {
+            ChoosePickerSelection(dlg, *st);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDOK) {
-            const int selected = ListView_GetNextItem(st->list, -1, LVNI_SELECTED);
-            if (selected < 0)
-                return TRUE;
-            LVITEMW item{};
-            item.mask = LVIF_PARAM;
-            item.iItem = selected;
-            ListView_GetItem(st->list, &item);
-            st->chosen = g_all[static_cast<size_t>(item.lParam)].target;
-            EndDialog(dlg, IDOK);
+            ChoosePickerSelection(dlg, *st);
             return TRUE;
         }
         if (LOWORD(wParam) == IDCANCEL) {
@@ -958,22 +1117,6 @@ INT_PTR CALLBACK PickerDlgProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
             return TRUE;
         }
         break;
-
-    case WM_NOTIFY: {
-        const NMHDR* hdr = reinterpret_cast<const NMHDR*>(lParam);
-        if (hdr->idFrom == IDC_PICK_LIST && hdr->code == NM_DBLCLK) {
-            PostMessageW(dlg, WM_COMMAND, IDOK, 0);
-            return TRUE;
-        }
-        break;
-    }
-
-    case WM_DESTROY:
-        ListView_SetImageList(st->list, nullptr, LVSIL_SMALL);
-        if (st->images)
-            ImageList_Destroy(st->images);
-        st->images = nullptr;
-        return FALSE;
     }
     return FALSE;
 }
@@ -994,23 +1137,11 @@ bool PickInstalledApp(std::wstring& targetOut)
     return true;
 }
 
-void ShowAddMenu(POINT screenPt)
+// The "+" tile: straight to the picker, its search box ready for typing.
+void AddInstalledApp()
 {
-    int cmd = 0;
-    {
-        ModalScope modal;
-        HMENU menu = CreatePopupMenu();
-        AppendMenuW(menu, MF_STRING, IDM_ADD_INSTALLED, L"Installed app…");
-        AppendMenuW(menu, MF_STRING, IDM_ADD_FILE, L"Browse for a file…");
-        cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTBUTTON | TPM_NONOTIFY, screenPt.x,
-                             screenPt.y, 0, g_hwnd, nullptr);
-        DestroyMenu(menu);
-    }
-
     std::wstring target;
-    if (cmd == IDM_ADD_INSTALLED && PickInstalledApp(target))
-        AddTarget(target);
-    else if (cmd == IDM_ADD_FILE && BrowseForFile(target))
+    if (PickInstalledApp(target))
         AddTarget(target);
 }
 
@@ -1048,10 +1179,7 @@ void Activate(int tile, bool forceNew)
     if (tile < 0 || tile >= TileCount())
         return;
     if (IsPlusTile(tile)) {
-        const RECT rc = TileRect(tile);
-        POINT pt{ rc.left + TileWidth() / 2, IconRectIn(rc).bottom };
-        ClientToScreen(g_hwnd, &pt);
-        ShowAddMenu(pt);
+        AddInstalledApp();
         return;
     }
     if (const LaunchpadApp* app = TileApp(tile))
@@ -1473,9 +1601,7 @@ void OnMouseDown(POINT pt)
     InvalidateRect(g_hwnd, nullptr, TRUE);
 
     if (IsPlusTile(tile)) {
-        POINT screen = pt;
-        ClientToScreen(g_hwnd, &screen);
-        ShowAddMenu(screen);
+        AddInstalledApp();
         return;
     }
     const RECT rc = TileRect(tile);
