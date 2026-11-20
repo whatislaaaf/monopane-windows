@@ -231,7 +231,10 @@ exists:
 - **Fuzzy search** over app name and window title — `chr` matches *Google Chrome*,
   `vsc` matches *Visual Studio Code*
 - **Keyboard navigation** — Up/Down arrows, Tab / Shift+Tab, PageUp/PageDown,
-  Enter to activate, Esc to dismiss
+  Enter to activate, Esc to dismiss (or Backspace / Delete in an empty search box)
+- **Straight out of full-screen games** — over a window that fills its whole
+  monitor, the hotkey skips the overlay and switches to the previous window,
+  as a quick Alt+Tab tap does; pressing it again from there opens the overlay
 - **App icons** next to each window, like Context
 - **Mouse support** — hover to select, click to activate
 - **Learned aliases** — activating a window with a search typed remembers that

@@ -326,6 +326,67 @@ void ShowOverlay()
     SetFocus(g_hwndEdit);
 }
 
+// Whether the window in front fills its whole monitor, taskbar and all: a
+// game, borderless or exclusive, or a video or browser gone full screen.
+// Opening the switcher over one of those makes an exclusive-mode game drop
+// out of its mode, and is a detour besides when all that was wanted was out.
+bool ForegroundIsFullscreen()
+{
+    const HWND fg = GetForegroundWindow();
+    if (!fg || fg == g_hwndOverlay || !IsWindowVisible(fg) || IsIconic(fg))
+        return false;
+
+    // The desktop fills the monitor too.
+    wchar_t cls[32] = {};
+    GetClassNameW(fg, cls, ARRAYSIZE(cls));
+    if (wcscmp(cls, L"Progman") == 0 || wcscmp(cls, L"WorkerW") == 0)
+        return false;
+
+    // A maximized window with a title bar spills past the monitor's edges
+    // too, by its border, once the taskbar auto-hides; it is not full screen.
+    const LONG style = GetWindowLongW(fg, GWL_STYLE);
+    if (IsZoomed(fg) && (style & WS_CAPTION) == WS_CAPTION)
+        return false;
+
+    RECT rc;
+    if (!GetWindowRect(fg, &rc))
+        return false;
+    MONITORINFO mi{ sizeof(mi) };
+    if (!GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mi))
+        return false;
+    const RECT& m = mi.rcMonitor;
+    return rc.left <= m.left && rc.top <= m.top && rc.right >= m.right && rc.bottom >= m.bottom;
+}
+
+// Out of a full-screen window to the one before it, with no overlay: what a
+// quick tap of Alt+Tab does. Returns false when there is nowhere to go, or
+// when Windows will not hand the foreground over, and the overlay opens as
+// it always did.
+//
+// Monopane is in the background here, with the game in front, and the Tab
+// that got it here was swallowed, so Windows' foreground lock stands against
+// it: ActivateWindow's plain SetForegroundWindow is refused. ForceForeground
+// goes through the lock the way the overlay itself does when it opens.
+bool SwitchStraightOut()
+{
+    const HWND fg = GetForegroundWindow();
+    HWND target = nullptr;
+    for (const WindowInfo& win : EnumerateAltTabWindows()) {
+        if (win.hwnd != fg) {
+            target = win.hwnd;
+            break;
+        }
+    }
+    if (!target)
+        return false;
+    ForceForeground(target);
+    if (GetForegroundWindow() != target)
+        return false;
+    if (IsIconic(target))
+        ShowWindow(target, SW_RESTORE);
+    return true;
+}
+
 void MoveSelection(int delta)
 {
     if (g_filtered.empty())
@@ -1016,6 +1077,11 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_APP_HOTKEY:
         if (LaunchpadVisible())
             HideLaunchpad();
+        // Over a full-screen game, straight out to the previous window. A
+        // second Tab, once that one is in front, opens the switcher as usual.
+        if (!g_overlayVisible && ForegroundIsFullscreen() &&
+            SwitchStraightOut())
+            return 0;
         if (!g_overlayVisible)
             ShowOverlay();
         else
