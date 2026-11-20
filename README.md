@@ -10,7 +10,7 @@ keyboard hook:
   a window's name, press Enter. Inspired by the *Search in Context* feature of
   the [Context](https://contexts.co) app on macOS.
 - **A launchpad** — Ctrl+Space opens a Start menu of your own: the apps you
-  have pinned, as many as you like, and a search across everything installed.
+  have pinned, as many as you like, and a search across them.
 
 And for games: **double-click the tray icon** and all of it pauses — the icon
 turns grey with a pause sign — so the keyboard in there is exactly what the
@@ -302,16 +302,15 @@ search box in the header, then **Pinned**, an eight-wide grid of your apps.
 The search box sits on the same line as the switcher's, 40% of the way down the
 screen, and the panel is as tall as the grid needs.
 
-Type to search, and the grid becomes **Best matches** from your pinned apps
-and every installed one (Store apps included). Arrows move the highlight,
-**Enter** or a click opens the app, **Esc** clears the search and then
-closes. Opening an app that already has a window brings that window forward;
-**Shift+Enter** or Shift+click starts a fresh instance regardless. Search
-memory works here too.
+Type to search, and the grid becomes **Best matches** from your pinned apps:
+only those, not everything installed. Arrows move the highlight, **Enter** or
+a click opens the app, **Esc** clears the search and then closes (as do
+Backspace and Delete in an empty search box). Opening an app that already has
+a window brings that window forward; **Shift+Enter** or Shift+click starts a
+fresh instance regardless. Search memory works here too.
 
-**Right-click** an app (or press the menu key) to **Pin to launchpad** a
-search result, or to **Unpin** or rename a pinned one. **Edit**, beside the
-Pinned heading, switches the grid to edit mode:
+**Right-click** an app (or press the menu key) to **Unpin** or rename it.
+**Edit**, beside the Pinned heading, switches the grid to edit mode:
 
 - **Drag** a tile to move it; the others shuffle out of the way
 - The **✕** on a tile removes it (or select it and press **Delete**)
@@ -323,9 +322,9 @@ Pinned heading, switches the grid to edit mode:
 
 **Done**, or Esc, leaves edit mode.
 
-The installed apps are read from the shell's Applications folder in the
-background — at startup, and again each time the launchpad opens — so the
-panel never waits for them.
+The installed apps the + tile lists are read from the shell's Applications
+folder in the background as edit mode starts, so the picker rarely waits for
+them.
 
 The first time it opens, the grid is seeded with whatever is pinned to your
 Start menu, in the same order. After that it is entirely yours: the list lives

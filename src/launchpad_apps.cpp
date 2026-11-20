@@ -779,17 +779,6 @@ std::vector<InstalledApp> EnumerateInstalledApps(int iconPx)
                 app.icon = ShellIcon(item, iconPx);
                 if (app.name.empty())
                     app.name = FileStem(parsing);
-                // What it runs, as ResolveLaunchpadApp has it for a pin, so
-                // search can tell an installed app from a pinned one by the
-                // program rather than by which shortcut leads to it.
-                IShellItem2* item2 = nullptr;
-                if (SUCCEEDED(item->QueryInterface(IID_PPV_ARGS(&item2)))) {
-                    app.exePath = ItemString(item2, PKEY_Link_TargetParsingPath);
-                    app.aumid = ItemString(item2, PKEY_AppUserModel_ID);
-                    item2->Release();
-                }
-                if (app.exePath.empty() && LooksLikePath(parsing) && EndsWithNoCase(parsing, L".exe"))
-                    app.exePath = parsing;
                 apps.push_back(std::move(app));
             }
             item->Release();

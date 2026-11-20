@@ -57,8 +57,6 @@ bool LaunchLaunchpadApp(const LaunchpadApp& app);
 struct InstalledApp {
     std::wstring name;
     std::wstring target;   // what to write to launchpad.ini to pin it
-    std::wstring exePath;  // the executable behind it, when known
-    std::wstring aumid;    // its AppUserModelID, when it has one
     HBITMAP icon = nullptr;
 };
 std::vector<InstalledApp> EnumerateInstalledApps(int iconPx);

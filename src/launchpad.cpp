@@ -50,13 +50,11 @@ constexpr int BASE_BADGE = 18;         // the remove badge on a tile, in edit mo
 
 static_assert(BASE_TILE_W * COLS + 2 * BASE_GRID_LEFT == BASE_PANEL_WIDTH,
               "the grid fills the panel exactly");
-constexpr int MAX_RESULTS = COLS * 4;
 
 constexpr UINT IDC_SEARCH = 100;
 constexpr UINT IDC_RENAME = 101;
 constexpr UINT IDM_ADD_INSTALLED = 1;
 constexpr UINT IDM_ADD_FILE = 2;
-constexpr UINT IDM_PIN = 3;
 constexpr UINT IDM_UNPIN = 4;
 constexpr UINT IDM_RENAME = 5;
 
@@ -90,25 +88,16 @@ COLORREF g_accent = CLR_ACCENT_FALLBACK;
 
 std::vector<LaunchpadApp> g_apps;  // pinned, in grid order
 int g_iconPx = 0;                  // the size g_apps' icons were resolved at
-std::vector<int> g_filtered;       // with no search: indices into g_apps, in order
+// The tiles shown, as indices into g_apps: all of them in order, or while
+// searching the pins that match, best first.
+std::vector<int> g_filtered;
 std::wstring g_query;
 
-// Every installed app, from the shell's Applications folder, for searching
-// and the picker. Replaced whole when a fresh enumeration differs.
+// Every installed app, from the shell's Applications folder, for the picker
+// the "+" tile opens. Search never looks at it: it covers the pins alone.
 std::vector<InstalledApp> g_all;
 int g_allPx = 0;
 std::atomic<bool> g_allLoading{ false };
-
-// Installed apps resolved as launchpad entries on demand — to show one among
-// the search results at grid size, or to open one — and kept.
-std::vector<LaunchpadApp> g_resolved;
-
-// While searching, the grid holds these: a pinned app, or an installed one.
-struct Result {
-    int pinned = -1;  // into g_apps
-    int all = -1;     // into g_all
-};
-std::vector<Result> g_results;
 
 // Content coordinates run down the body from its top, unscrolled.
 int g_gridTop = 0;
@@ -228,46 +217,6 @@ int PinnedIndexOf(const std::wstring& target)
     return -1;
 }
 
-bool SameNonEmpty(const std::wstring& a, const std::wstring& b)
-{
-    return !a.empty() && !b.empty() && SameTarget(a, b);
-}
-
-// Whether an installed app is one already pinned: the same entry, or another
-// way to the same program. A pin of steam.exe and the Start menu's Steam
-// shortcut run the same executable; a Store app is the same AppUserModelID.
-bool InstalledIsPinned(const InstalledApp& installed)
-{
-    for (const LaunchpadApp& app : g_apps)
-        if (SameTarget(app.target, installed.target) ||
-            SameNonEmpty(app.exePath, installed.exePath) ||
-            SameNonEmpty(app.aumid, installed.aumid))
-            return true;
-    return false;
-}
-
-// An installed app as a launchpad entry, resolved at grid size the first time
-// it is asked for.
-const LaunchpadApp& ResolvedApp(const InstalledApp& installed)
-{
-    for (const LaunchpadApp& app : g_resolved)
-        if (SameTarget(app.target, installed.target))
-            return app;
-    LaunchpadApp app;
-    app.target = installed.target;
-    ResolveLaunchpadApp(app, g_iconPx);
-    if (app.displayName.empty())
-        app.displayName = installed.name;
-    g_resolved.push_back(std::move(app));
-    return g_resolved.back();
-}
-
-void ClearResolved()
-{
-    FreeLaunchpadIcons(g_resolved);
-    g_resolved.clear();
-}
-
 // ---------------------------------------------------------------------------
 // The installed apps, enumerated off the UI thread
 
@@ -300,8 +249,9 @@ DWORD WINAPI AllAppsThread(void* param)
 }
 
 // Walks the Applications folder again in the background. Enumerating it and
-// pulling every icon takes long enough that the panel must never wait for it:
-// what search finds is the last one that came back.
+// pulling every icon takes long enough that nothing should wait for it, so
+// it starts when edit mode does: by the time the "+" tile's picker is
+// opened, the list is usually there.
 void RefreshAllApps()
 {
     if (g_allLoading.exchange(true))
@@ -394,8 +344,6 @@ bool PlusTileShown()
 
 int TileCount()
 {
-    if (Searching())
-        return static_cast<int>(g_results.size());
     return static_cast<int>(g_filtered.size()) + (PlusTileShown() ? 1 : 0);
 }
 
@@ -409,18 +357,15 @@ const LaunchpadApp* TileApp(int tile)
 {
     if (tile < 0 || tile >= TileCount() || IsPlusTile(tile))
         return nullptr;
-    if (!Searching())
-        return &g_apps[g_filtered[tile]];
-    const Result& r = g_results[tile];
-    return r.pinned >= 0 ? &g_apps[r.pinned] : &ResolvedApp(g_all[r.all]);
+    return &g_apps[g_filtered[tile]];
 }
 
-// The pinned entry a tile is, or -1 (the "+" tile, or an unpinned result).
+// The pinned entry a tile is, or -1 for the "+" tile.
 int TilePinnedIndex(int tile)
 {
     if (tile < 0 || tile >= TileCount() || IsPlusTile(tile))
         return -1;
-    return Searching() ? g_results[tile].pinned : g_filtered[tile];
+    return g_filtered[tile];
 }
 
 int GridRows()
@@ -542,20 +487,18 @@ void ApplyFilter(bool resetSelection)
 {
     g_query = Trim(GetSearchText());
     g_filtered.clear();
-    g_results.clear();
 
     if (!Searching()) {
         for (int i = 0; i < static_cast<int>(g_apps.size()); ++i)
             g_filtered.push_back(i);
     } else {
-        // Pinned and installed apps together, best first; an installed app
-        // that runs the same program as a pin counts once, as the pin,
-        // whatever either is called.
+        // The pins that match, best first. Only the pins: the launchpad is
+        // the apps chosen for it, not everything the Start menu knows of.
         const std::wstring aliasTarget = LookupAlias(g_query);
         constexpr int kAliasBoost = 1 << 20;
         struct Scored {
             int score;
-            Result result;
+            int index;
         };
         std::vector<Scored> scored;
         for (int i = 0; i < static_cast<int>(g_apps.size()); ++i) {
@@ -564,22 +507,12 @@ void ApplyFilter(bool resetSelection)
                 SameTarget(g_apps[i].exePath, aliasTarget))
                 score = (score < 0 ? 0 : score) + kAliasBoost;
             if (score >= 0)
-                scored.push_back({ score, Result{ i, -1 } });
-        }
-        for (int i = 0; i < static_cast<int>(g_all.size()); ++i) {
-            if (InstalledIsPinned(g_all[i]))
-                continue;
-            const int score = FuzzyScore(g_query, g_all[i].name);
-            if (score >= 0)
-                scored.push_back({ score, Result{ -1, i } });
+                scored.push_back({ score, i });
         }
         std::stable_sort(scored.begin(), scored.end(),
                          [](const Scored& a, const Scored& b) { return a.score > b.score; });
-        for (const Scored& s : scored) {
-            if (static_cast<int>(g_results.size()) >= MAX_RESULTS)
-                break;
-            g_results.push_back(s.result);
-        }
+        for (const Scored& s : scored)
+            g_filtered.push_back(s.index);
     }
 
     if (resetSelection) {
@@ -802,6 +735,9 @@ void SetEditMode(bool on)
     SetWindowTextW(g_edit, L"");
     ApplyFilter(false);
     Layout(false);
+    // The "+" tile's picker lists the installed apps; start fetching them now.
+    if (on)
+        RefreshAllApps();
 }
 
 void Unpin(int appIndex)
@@ -1122,38 +1058,29 @@ void Activate(int tile, bool forceNew)
         Open(*app, forceNew);
 }
 
-// Right-click: pin a search result, unpin or rename a pinned app.
+// Right-click: unpin or rename a pinned app.
 void ShowItemMenu(int tile, POINT screenPt)
 {
-    if (tile < 0 || tile >= TileCount() || IsPlusTile(tile))
-        return;
-    const int item = tile;
-
     const int pinned = TilePinnedIndex(tile);
-    const std::wstring target = pinned < 0 ? g_all[g_results[tile].all].target : L"";
+    if (pinned < 0)
+        return;
 
     int cmd = 0;
     {
         ModalScope modal;
         HMENU menu = CreatePopupMenu();
-        if (pinned >= 0) {
-            AppendMenuW(menu, MF_STRING, IDM_UNPIN, L"Unpin from launchpad");
-            if (item < TileCount() && !Searching())
-                AppendMenuW(menu, MF_STRING, IDM_RENAME, L"Rename");
-        } else {
-            AppendMenuW(menu, MF_STRING, IDM_PIN, L"Pin to launchpad");
-        }
+        AppendMenuW(menu, MF_STRING, IDM_UNPIN, L"Unpin from launchpad");
+        if (!Searching())
+            AppendMenuW(menu, MF_STRING, IDM_RENAME, L"Rename");
         cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, screenPt.x,
                              screenPt.y, 0, g_hwnd, nullptr);
         DestroyMenu(menu);
     }
 
-    if (cmd == IDM_PIN)
-        AddTarget(target);
-    else if (cmd == IDM_UNPIN)
+    if (cmd == IDM_UNPIN)
         Unpin(pinned);
     else if (cmd == IDM_RENAME)
-        BeginRename(item);
+        BeginRename(tile);
 }
 
 // ---------------------------------------------------------------------------
@@ -1252,8 +1179,8 @@ void DrawGrid(HDC mem, int width)
         SelectObject(mem, g_fontRow);
         SetTextColor(mem, CLR_TEXT_DIM);
         const wchar_t* text = Searching()
-            ? L"No matching apps"
-            : L"Nothing pinned yet. Search for an app and right-click it to pin it, or press Edit.";
+            ? L"No matching pinned apps"
+            : L"Nothing pinned yet. Press Edit, then the + tile, to add apps.";
         DrawTextW(mem, text, -1, &row, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         return;
     }
@@ -1634,11 +1561,6 @@ void OnAllApps(AllAppsBatch* batch)
     g_all = std::move(batch->apps);
     g_allPx = batch->px;
     delete batch;
-    // The results and the rows both index into g_all.
-    if (g_visible) {
-        ApplyFilter(false);
-        Layout(false);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1784,8 +1706,6 @@ LRESULT CALLBACK LaunchpadWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         g_iconPx = Scale(BASE_ICON);
         for (LaunchpadApp& app : g_apps)
             ResolveLaunchpadApp(app, g_iconPx);
-        ClearResolved();
-        RefreshAllApps();
         if (g_visible)
             Layout(true);
         return 0;
@@ -1841,9 +1761,6 @@ HWND CreateLaunchpadWindow(HINSTANCE instance)
     DwmSetWindowAttribute(hwnd, 34 /*DWMWA_BORDER_COLOR*/, &border, sizeof(border));
 
     BeginLaunchpadSeed();
-    // The installed apps are searchable from the first press, then kept
-    // fresh on each.
-    RefreshAllApps();
     return hwnd;
 }
 
@@ -1867,8 +1784,6 @@ void ShowLaunchpad()
     ShowWindow(g_hwnd, SW_SHOW);
     ForceForeground(g_hwnd);
     SetFocus(g_edit);
-
-    RefreshAllApps();
 }
 
 void HideLaunchpad()
@@ -1899,7 +1814,6 @@ void OpenLaunchpadConfigFolder()
 void DestroyLaunchpadResources()
 {
     FreeLaunchpadIcons(g_apps);
-    ClearResolved();
     FreeInstalled(g_all);
     for (HFONT f : { g_fontName, g_fontRow, g_fontHeading, g_fontEdit, g_fontGlyph,
                      g_fontGlyphSmall, g_fontGlyphBig })
